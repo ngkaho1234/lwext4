@@ -1,993 +1,1616 @@
-/*
- * Copyright (c) 2013 Grzegorz Kostka (kostka.grzegorz@gmail.com)
- *
- *
- * HelenOS:
- * Copyright (c) 2012 Martin Sucha
- * Copyright (c) 2012 Frantisek Princ
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * - Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- * - Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the distribution.
- * - The name of the author may not be used to endorse or promote products
- *   derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-/** @addtogroup lwext4
- * @{
- */
-/**
- * @file  ext4_extent.c
- * @brief More complex filesystem functions.
- */
-
-#include "ext4_config.h"
-#include "ext4_extent.h"
-#include "ext4_inode.h"
-#include "ext4_super.h"
 #include "ext4_blockdev.h"
 #include "ext4_balloc.h"
+#include "ext4_extent.h"
 
+#include <memory.h>
 #include <string.h>
-#include <stdlib.h>
+#include <malloc.h>
 
-uint32_t ext4_extent_get_first_block(struct ext4_extent *extent)
+/*
+ * used by extent splitting.
+ */
+#define EXT4_EXT_MARK_UNWRIT1	0x2  /* mark first half unwritten */
+#define EXT4_EXT_MARK_UNWRIT2	0x4  /* mark second half unwritten */
+
+#define EXT4_EXT_DATA_VALID1	0x8  /* first half contains valid data */
+#define EXT4_EXT_DATA_VALID2	0x10 /* second half contains valid data */
+
+#define _EXTENTS_TEST
+#ifdef _EXTENTS_TEST
+
+#define ext4_inode_to_goal_block(inode) (0)
+
+static inline int ext4_allocate_single_block(struct ext4_inode_ref *inode_ref,
+					     ext4_fsblk_t fake,
+					     ext4_fsblk_t *blockp,
+					     unsigned long count)
 {
-	return to_le32(extent->first_block);
 }
 
-void ext4_extent_set_first_block(struct ext4_extent *extent, uint32_t iblock)
+static ext4_fsblk_t ext4_new_meta_blocks(struct ext4_inode_ref *inode_ref,
+			ext4_fsblk_t goal,
+			unsigned int flags,
+			unsigned long *count, int *errp)
 {
-	extent->first_block = to_le32(iblock);
+	ext4_fsblk_t block = 0;
+	unsigned long nrblocks = (count)?(*count):1;
+
+	*errp = ext4_allocate_single_block(inode_ref, goal, &block, nrblocks);
+	if (count)
+		*count = 1;
+	return block;
 }
 
-uint16_t ext4_extent_get_block_count(struct ext4_extent *extent)
+static void ext4_ext_free_blocks(struct ext4_inode_ref *inode_ref,
+				 ext4_fsblk_t block, int count, int flags)
 {
-	if (EXT4_EXT_IS_UNWRITTEN(extent))
-		return EXT4_EXT_GET_LEN_UNWRITTEN(extent);
+}
+
+#define ext_debug printf
+#endif
+
+static inline int ext4_ext_space_block(struct ext4_inode_ref *inode_ref,
+		int check)
+{
+	int size;
+	uint32_t block_size = ext4_sb_get_block_size(&inode_ref->fs->sb);
+
+	size = (block_size - sizeof(struct ext4_extent_header))
+			/ sizeof(struct ext4_extent);
+#ifdef AGGRESSIVE_TEST
+	if (!check && size > 6)
+		size = 6;
+#endif
+	return size;
+}
+
+static inline int ext4_ext_space_block_idx(struct ext4_inode_ref *inode_ref,
+		int check)
+{
+	int size;
+	uint32_t block_size = ext4_sb_get_block_size(&inode_ref->fs->sb);
+
+	size = (block_size - sizeof(struct ext4_extent_header))
+			/ sizeof(struct ext4_extent_idx);
+#ifdef AGGRESSIVE_TEST
+	if (!check && size > 5)
+		size = 5;
+#endif
+	return size;
+}
+
+static inline int ext4_ext_space_root(struct ext4_inode_ref *inode_ref,
+		int check)
+{
+	int size;
+
+	size = sizeof(inode_ref->inode->blocks);
+	size -= sizeof(struct ext4_extent_header);
+	size /= sizeof(struct ext4_extent);
+#ifdef AGGRESSIVE_TEST
+	if (!check && size > 3)
+		size = 3;
+#endif
+	return size;
+}
+
+static inline int ext4_ext_space_root_idx(struct ext4_inode_ref *inode_ref, int check)
+{
+	int size;
+
+	size = sizeof(inode_ref->inode->blocks);
+	size -= sizeof(struct ext4_extent_header);
+	size /= sizeof(struct ext4_extent_idx);
+#ifdef AGGRESSIVE_TEST
+	if (!check && size > 4)
+		size = 4;
+#endif
+	return size;
+}
+
+static int ext4_ext_max_entries(struct ext4_inode_ref *inode_ref,
+		int depth, int check)
+{
+	int max;
+
+	if (depth == ext_depth(inode_ref->inode)) {
+		if (depth == 0)
+			max = ext4_ext_space_root(inode_ref, check);
+		else
+			max = ext4_ext_space_root_idx(inode_ref, check);
+	} else {
+		if (depth == 0)
+			max = ext4_ext_space_block(inode_ref, check);
+		else
+			max = ext4_ext_space_block_idx(inode_ref, check);
+	}
+
+	return max;
+}
+
+static ext4_fsblk_t ext4_ext_find_goal(struct ext4_inode_ref *inode_ref,
+			      struct ext4_ext_path *path,
+			      ext4_lblk_t block)
+{
+	if (path) {
+		int depth = path->p_depth;
+		struct ext4_extent *ex;
+
+		/*
+		 * Try to predict block placement assuming that we are
+		 * filling in a file which will eventually be
+		 * non-sparse --- i.e., in the case of libbfd writing
+		 * an ELF object sections out-of-order but in a way
+		 * the eventually results in a contiguous object or
+		 * executable file, or some database extending a table
+		 * space file.  However, this is actually somewhat
+		 * non-ideal if we are writing a sparse file such as
+		 * qemu or KVM writing a raw image file that is going
+		 * to stay fairly sparse, since it will end up
+		 * fragmenting the file system's free space.  Maybe we
+		 * should have some hueristics or some way to allow
+		 * userspace to pass a hint to file system,
+		 * especially if the latter case turns out to be
+		 * common.
+		 */
+		ex = path[depth].p_ext;
+		if (ex) {
+			ext4_fsblk_t ext_pblk = ext4_ext_pblock(ex);
+			ext4_lblk_t ext_block = to_le32(ex->ee_block);
+
+			if (block > ext_block)
+				return ext_pblk + (block - ext_block);
+			else
+				return ext_pblk - (ext_block - block);
+		}
+
+		/* it looks like index is empty;
+		 * try to find starting block from index itself */
+		if (path[depth].p_bh.lb_id)
+			return path[depth].p_bh.lb_id;
+	}
+
+	/* OK. use inode's group */
+	return ext4_inode_to_goal_block(inode_ref);
+}
+
+/*
+ * Allocation for a meta data block
+ */
+static ext4_fsblk_t
+ext4_ext_new_meta_block(struct ext4_inode_ref *inode_ref,
+			struct ext4_ext_path *path,
+			struct ext4_extent *ex, int *err, unsigned int flags)
+{
+	ext4_fsblk_t goal, newblock;
+
+	goal = ext4_ext_find_goal(inode_ref, path, to_le32(ex->ee_block));
+	newblock = ext4_new_meta_blocks(inode_ref, goal, flags,
+					NULL, err);
+	return newblock;
+}
+
+static int __ext4_ext_dirty(struct ext4_inode_ref *inode_ref,
+		      struct ext4_ext_path *path)
+{
+	int err;
+
+	if (path->p_bh.lb_id) {
+		/*ext4_extent_block_csum_set(inode, ext_block_hdr(path->p_bh));*/
+		/* path points to block */
+		err = 0;
+		path->p_bh.dirty = true;
+	} else {
+		/* path points to leaf/index in inode body */
+		err = 0;
+		inode_ref->dirty = true;
+	}
+	return err;
+}
+
+void ext4_ext_drop_refs(struct ext4_inode_ref *inode_ref,
+		struct ext4_ext_path *path, int keep_other)
+{
+	int depth, i;
+
+	if (!path)
+		return;
+	if (keep_other)
+		depth = 0;
 	else
-		return EXT4_EXT_GET_LEN(extent);
+		depth = path->p_depth;
+
+	for (i = 0; i <= depth; i++, path++)
+		if (path->p_bh.lb_id) {
+			ext4_block_set(inode_ref->fs->bdev,
+					&path->p_bh);
+		}
 }
 
-void ext4_extent_set_block_count(struct ext4_extent *extent, uint16_t count,
-				 bool unwritten)
+static uint32_t ext4_ext_block_csum(struct ext4_inode_ref *inode_ref,
+				    struct ext4_extent_header *eh)
 {
-	EXT4_EXT_SET_LEN(extent, count);
-	if (unwritten)
-		EXT4_EXT_SET_UNWRITTEN(extent);
+	/*return ext4_crc32c(inode->i_csum, eh, EXT4_EXTENT_TAIL_OFFSET(eh));*/
+	return 0;
 }
 
-uint64_t ext4_extent_get_start(struct ext4_extent *extent)
+static void ext4_extent_block_csum_set(struct ext4_inode_ref *inode_ref,
+				    struct ext4_extent_header *eh)
 {
-	return ((uint64_t)to_le16(extent->start_hi)) << 32 |
-	       ((uint64_t)to_le32(extent->start_lo));
+	struct ext4_extent_tail *tail;
+
+	tail = find_ext4_extent_tail(eh);
+	tail->et_checksum = ext4_ext_block_csum(
+			inode_ref, eh);
 }
 
-void ext4_extent_set_start(struct ext4_extent *extent, uint64_t fblock)
+/*
+ * Check that whether the basic information inside the extent header
+ * is correct or not.
+ */
+static int ext4_ext_check(struct ext4_inode_ref *inode_ref,
+			    struct ext4_extent_header *eh, int depth,
+			    ext4_fsblk_t pblk)
 {
-	extent->start_lo = to_le32((fblock << 32) >> 32);
-	extent->start_hi = to_le16((uint16_t)(fblock >> 32));
+	struct ext4_extent_tail *tail;
+	const char *error_msg;
+	int max = 0;
+
+	if (to_le16(eh->eh_magic) != EXT4_EXT_MAGIC) {
+		error_msg = "invalid magic";
+		goto corrupted;
+	}
+	if (to_le16(eh->eh_depth) != depth) {
+		error_msg = "unexpected eh_depth";
+		goto corrupted;
+	}
+	if (eh->eh_max == 0) {
+		error_msg = "invalid eh_max";
+		goto corrupted;
+	}
+	if (to_le16(eh->eh_entries) > to_le16(eh->eh_max)) {
+		error_msg = "invalid eh_entries";
+		goto corrupted;
+	}
+
+	tail = find_ext4_extent_tail(eh);
+	if (tail->et_checksum != ext4_ext_block_csum(inode_ref, eh)) {
+		/* FIXME: Warning: extent checksum damaged? */
+	}
+
+	return 0;
+
+corrupted:
+	return -EIO;
 }
 
-uint32_t ext4_extent_index_get_first_block(struct ext4_extent_index *index)
+static int
+read_extent_tree_block(struct ext4_inode_ref *inode_ref,
+			ext4_fsblk_t pblk, int depth,
+			struct ext4_block *bh, int flags)
 {
-	return to_le32(index->first_block);
+	int				err;
+
+	err = ext4_block_get(inode_ref->fs->bdev, bh, pblk);
+	if (err != EOK)
+		goto errout;
+
+	err = ext4_ext_check(inode_ref,
+			       ext_block_hdr(bh), depth, pblk);
+	if (err)
+		goto errout;
+
+out:
+	return EOK;
+errout:
+	if (bh->lb_id)
+		ext4_block_set(inode_ref->fs->bdev, bh);
+
+	return err;
 }
 
-void ext4_extent_index_set_first_block(struct ext4_extent_index *index,
-				       uint32_t iblock)
+/*
+ * ext4_ext_binsearch_idx:
+ * binary search for the closest index of the given block
+ * the header must be checked before calling this
+ */
+static void
+ext4_ext_binsearch_idx(struct ext4_inode_ref *inode_ref,
+			struct ext4_ext_path *path, ext4_lblk_t block)
 {
-	index->first_block = to_le32(iblock);
-}
+	struct ext4_extent_header *eh = path->p_hdr;
+	struct ext4_extent_idx *r, *l, *m;
 
-uint64_t ext4_extent_index_get_leaf(struct ext4_extent_index *index)
-{
-	return ((uint64_t)to_le16(index->leaf_hi)) << 32 |
-	       ((uint64_t)to_le32(index->leaf_lo));
-}
-
-void ext4_extent_index_set_leaf(struct ext4_extent_index *index,
-				uint64_t fblock)
-{
-	index->leaf_lo = to_le32((fblock << 32) >> 32);
-	index->leaf_hi = to_le16((uint16_t)(fblock >> 32));
-}
-
-uint16_t ext4_extent_header_get_magic(struct ext4_extent_header *header)
-{
-	return to_le16(header->magic);
-}
-
-void ext4_extent_header_set_magic(struct ext4_extent_header *header,
-				  uint16_t magic)
-{
-	header->magic = to_le16(magic);
-}
-
-uint16_t ext4_extent_header_get_entries_count(struct ext4_extent_header *header)
-{
-	return to_le16(header->entries_count);
-}
-
-void ext4_extent_header_set_entries_count(struct ext4_extent_header *header,
-					  uint16_t count)
-{
-	header->entries_count = to_le16(count);
-}
-
-uint16_t
-ext4_extent_header_get_max_entries_count(struct ext4_extent_header *header)
-{
-	return to_le16(header->max_entries_count);
-}
-
-void ext4_extent_header_set_max_entries_count(struct ext4_extent_header *header,
-					      uint16_t max_count)
-{
-	header->max_entries_count = to_le16(max_count);
-}
-
-uint16_t ext4_extent_header_get_depth(struct ext4_extent_header *header)
-{
-	return to_le16(header->depth);
-}
-
-void ext4_extent_header_set_depth(struct ext4_extent_header *header,
-				  uint16_t depth)
-{
-	header->depth = to_le16(depth);
-}
-
-uint32_t ext4_extent_header_get_generation(struct ext4_extent_header *header)
-{
-	return to_le32(header->generation);
-}
-
-void ext4_extent_header_set_generation(struct ext4_extent_header *header,
-				       uint32_t generation)
-{
-	header->generation = to_le32(generation);
-}
-
-/**@brief Binary search in extent index node.
- * @param header Extent header of index node
- * @param index  Output value - found index will be set here
- * @param iblock Logical block number to find in index node */
-static void ext4_extent_binsearch_idx(struct ext4_extent_header *header,
-				      struct ext4_extent_index **index,
-				      uint32_t iblock)
-{
-	struct ext4_extent_index *r;
-	struct ext4_extent_index *l;
-	struct ext4_extent_index *m;
-
-	uint16_t entries_count = ext4_extent_header_get_entries_count(header);
-
-	/* Initialize bounds */
-	l = EXT4_EXTENT_FIRST_INDEX(header) + 1;
-	r = EXT4_EXTENT_FIRST_INDEX(header) + entries_count - 1;
-
-	/* Do binary search */
+	l = EXT_FIRST_INDEX(eh) + 1;
+	r = EXT_LAST_INDEX(eh);
 	while (l <= r) {
 		m = l + (r - l) / 2;
-		uint32_t first_block = ext4_extent_index_get_first_block(m);
-
-		if (iblock < first_block)
+		if (block < to_le32(m->ei_block))
 			r = m - 1;
 		else
 			l = m + 1;
 	}
 
-	/* Set output value */
-	*index = l - 1;
+	path->p_idx = l - 1;
+
 }
 
-/**@brief Binary search in extent leaf node.
- * @param header Extent header of leaf node
- * @param extent Output value - found extent will be set here,
- *               or NULL if node is empty
- * @param iblock Logical block number to find in leaf node */
-static void ext4_extent_binsearch(struct ext4_extent_header *header,
-				  struct ext4_extent **extent, uint32_t iblock)
+/*
+ * ext4_ext_binsearch:
+ * binary search for closest extent of the given block
+ * the header must be checked before calling this
+ */
+static void
+ext4_ext_binsearch(struct ext4_inode_ref *inode_ref,
+		struct ext4_ext_path *path, ext4_lblk_t block)
 {
-	struct ext4_extent *r;
-	struct ext4_extent *l;
-	struct ext4_extent *m;
+	struct ext4_extent_header *eh = path->p_hdr;
+	struct ext4_extent *r, *l, *m;
 
-	uint16_t entries_count = ext4_extent_header_get_entries_count(header);
-
-	if (entries_count == 0) {
-		/* this leaf is empty */
-		*extent = NULL;
+	if (eh->eh_entries == 0) {
+		/*
+		 * this leaf is empty:
+		 * we get such a leaf in split/add case
+		 */
 		return;
 	}
 
-	/* Initialize bounds */
-	l = EXT4_EXTENT_FIRST(header) + 1;
-	r = EXT4_EXTENT_FIRST(header) + entries_count - 1;
+	l = EXT_FIRST_EXTENT(eh) + 1;
+	r = EXT_LAST_EXTENT(eh);
 
-	/* Do binary search */
 	while (l <= r) {
 		m = l + (r - l) / 2;
-		uint32_t first_block = ext4_extent_get_first_block(m);
-
-		if (iblock < first_block)
+		if (block < to_le32(m->ee_block))
 			r = m - 1;
 		else
 			l = m + 1;
 	}
 
-	/* Set output value */
-	*extent = l - 1;
+	path->p_ext = l - 1;
+
 }
 
-int ext4_extent_find_block(struct ext4_inode_ref *inode_ref, uint32_t iblock,
-			   uint32_t *fblock)
+#define EXT4_EXT_PATH_INC_DEPTH 1
+
+int ext4_find_extent(struct ext4_inode_ref *inode_ref,
+		ext4_lblk_t block,
+		struct ext4_ext_path **orig_path, int flags)
 {
-	int rc;
-	/* Compute bound defined by i-node size */
-	uint64_t inode_size =
-	    ext4_inode_get_size(&inode_ref->fs->sb, inode_ref->inode);
+	struct ext4_extent_header *eh;
+	struct ext4_block bh;
+	ext4_fsblk_t buf_block = 0;
+	struct ext4_ext_path *path = *orig_path;
+	int depth, i, ppos = 0;
+	int ret;
 
-	uint32_t block_size = ext4_sb_get_block_size(&inode_ref->fs->sb);
+	eh = ext_inode_hdr(inode_ref->inode);
+	depth = ext_depth(inode_ref->inode);
 
-	uint32_t last_idx = (inode_size - 1) / block_size;
+	if (path) {
+		ext4_ext_drop_refs(inode_ref, path, 0);
+		if (depth > path[0].p_maxdepth) {
+			free(path);
+			*orig_path = path = NULL;
+		}
+	}
+	if (!path) {
+		int path_depth = depth + EXT4_EXT_PATH_INC_DEPTH;
+		/* account possible depth increase */
+		path = calloc(1, sizeof(struct ext4_ext_path) *
+					(path_depth + 1));
+		if (!path)
+			return -ENOMEM;
+		path[0].p_maxdepth = path_depth;
+	}
+	path[0].p_hdr = eh;
+	path[0].p_bh = bh;
 
-	/* Check if requested iblock is not over size of i-node */
-	if (iblock > last_idx) {
-		*fblock = 0;
+	i = depth;
+	/* walk through the tree */
+	while (i) {
+		ext4_ext_binsearch_idx(inode_ref, path + ppos, block);
+		path[ppos].p_block = ext4_idx_pblock(path[ppos].p_idx);
+		path[ppos].p_depth = i;
+		path[ppos].p_ext = NULL;
+		buf_block = path[ppos].p_block;
+
+		i--;
+		ppos++;
+		if (!path[ppos].p_bh.lb_id ||
+		    path[ppos].p_bh.lb_id != buf_block) {
+			ret = read_extent_tree_block(inode_ref,
+						buf_block, i,
+						&bh, flags);
+			if (ret != EOK) {
+				goto err;
+			}
+			if (ppos > depth) {
+				ext4_block_set(inode_ref->fs->bdev,
+						&bh);
+				ret = EIO;
+				goto err;
+			}
+
+			eh = ext_block_hdr(&bh);
+			path[ppos].p_bh = bh;
+			path[ppos].p_hdr = eh;
+		}
+	}
+
+	path[ppos].p_depth = i;
+	path[ppos].p_ext = NULL;
+	path[ppos].p_idx = NULL;
+
+	/* find extent */
+	ext4_ext_binsearch(inode_ref, path + ppos, block);
+	/* if not an empty leaf */
+	if (path[ppos].p_ext)
+		path[ppos].p_block = ext4_ext_pblock(path[ppos].p_ext);
+
+	*orig_path = path;
+
+	ret = 0;
+	return ret;
+
+err:
+	ext4_ext_drop_refs(inode_ref, path, 0);
+	free(path);
+	if (orig_path)
+		*orig_path = NULL;
+	return ret;
+}
+
+static int ext4_ext_init_header(struct ext4_inode_ref *inode_ref,
+			struct ext4_extent_header *eh, int depth)
+{
+	eh->eh_entries = 0;
+	eh->eh_max = to_le16(ext4_ext_max_entries(inode_ref, depth, 0));
+	eh->eh_magic = to_le16(EXT4_EXT_MAGIC);
+	eh->eh_depth = depth;
+}
+
+/*
+ * Be cautious, the buffer_head returned is not yet mark dirtied. */
+static int ext4_ext_split_node(struct ext4_inode_ref *inode_ref,
+			       struct ext4_ext_path *path,
+			       int at,
+			       struct ext4_extent *newext,
+			       ext4_fsblk_t *sibling,
+			       struct ext4_block *new_bh)
+{
+	int ret;
+	ext4_fsblk_t newblock;
+	struct ext4_block bh;
+	int depth = ext_depth(inode_ref->inode);
+
+	ext4_assert(sibling);
+
+	/* FIXME: currently we split at the point after the current extent. */
+	newblock = ext4_ext_new_meta_block(inode_ref, path,
+					   newext, &ret, 0);
+	if (ret)
+		goto cleanup;
+
+	/*  For write access.# */
+	ret = ext4_block_get(inode_ref->fs->bdev, &bh, newblock);
+	if (ret != EOK)
+		goto cleanup;
+
+	if (at == depth) {
+		/* start copy from next extent */
+		int m = EXT_MAX_EXTENT(path[at].p_hdr) - path[at].p_ext;
+		struct ext4_extent_header *neh;
+		neh = ext_block_hdr(&bh);
+		ext4_ext_init_header(inode_ref, neh, 0);
+		if (m) {
+			struct ext4_extent *ex;
+			ex = EXT_FIRST_EXTENT(neh);
+			memmove(ex, path[at].p_ext + 1, sizeof(struct ext4_extent) * m);
+			neh->eh_entries =
+				to_le16(to_le16(neh->eh_entries) + m);
+			path[at].p_hdr->eh_entries =
+				to_le16(to_le16(path[at].p_hdr->eh_entries) - m);
+			ret = __ext4_ext_dirty(inode_ref, path + at);
+			if (ret)
+				goto cleanup;
+
+		}
+	} else {
+		int m = EXT_MAX_INDEX(path[at].p_hdr) - path[at].p_idx;
+		struct ext4_extent_header *neh;
+		neh = ext_block_hdr(&bh);
+		ext4_ext_init_header(inode_ref, neh, depth - at);
+		if (m) {
+			struct ext4_extent_idx *ix;
+			ix = EXT_FIRST_INDEX(neh);
+			memmove(ix, path[at].p_idx + 1, sizeof(struct ext4_extent) * m);
+			neh->eh_entries =
+				to_le16(to_le16(neh->eh_entries) + m);
+			path[at].p_hdr->eh_entries =
+				to_le16(to_le16(path[at].p_hdr->eh_entries) - m);
+			ret = __ext4_ext_dirty(inode_ref, path + at);
+			if (ret)
+				goto cleanup;
+
+		}
+	}
+cleanup:
+	if (ret) {
+		if (bh.lb_id) {
+			ext4_block_set(inode_ref->fs->bdev, &bh);
+		}
+		if (newblock)
+			ext4_ext_free_blocks(inode_ref, newblock, 1, 0);
+
+		newblock = 0;
+	}
+	*sibling = newblock;
+	*new_bh = bh;
+	return ret;
+}
+
+static ext4_lblk_t ext4_ext_block_index(struct ext4_extent_header *eh)
+{
+	if (eh->eh_depth)
+		return to_le32(EXT_FIRST_INDEX(eh)->ei_block);
+
+	return to_le32(EXT_FIRST_EXTENT(eh)->ee_block);
+}
+
+#define EXT_INODE_HDR_NEED_GROW 0x1
+
+struct ext_split_trans {
+	ext4_fsblk_t	     ptr;
+	struct ext4_ext_path path;
+	int		     switch_to;
+};
+
+static int ext4_ext_insert_index(struct ext4_inode_ref *inode_ref,
+			       struct ext4_ext_path *path,
+			       int at,
+			       struct ext4_extent *newext,
+			       ext4_lblk_t insert_index,
+			       ext4_fsblk_t insert_block,
+			       struct ext_split_trans *spt)
+{
+	int switch_to = 0;
+	struct ext4_extent_idx *ix;
+	struct ext4_ext_path *curp = path + at;
+	struct ext4_block bh;
+	int len, err;
+	struct ext4_extent_header *eh;
+
+	if (curp->p_idx && insert_index == to_le32(curp->p_idx->ei_block))
+		return EIO;
+
+	if (to_le16(curp->p_hdr->eh_entries)
+			     == to_le16(curp->p_hdr->eh_max)) {
+		if (at) {
+			struct ext4_extent_header *neh;
+			err = ext4_ext_split_node(inode_ref,
+						  path, at,
+						  newext, &spt->ptr, &bh);
+			if (err)
+				goto out;
+
+			neh = ext_block_hdr(&bh);
+			if (insert_index >
+				to_le32(curp->p_idx->ei_block)) {
+				/* Make decision which node should be used to insert the index.*/
+				if (to_le16(neh->eh_entries) >
+					to_le16(curp->p_hdr->eh_entries)) {
+					eh = curp->p_hdr;
+					/* insert after */
+					ix = EXT_LAST_INDEX(eh) + 1;
+				} else {
+					eh = neh;
+					ix = EXT_FIRST_INDEX(eh);
+					switch_to = 1;
+				}
+			} else {
+				eh = curp->p_hdr;
+				/* insert before */
+				ix = EXT_LAST_INDEX(eh);
+			}
+		} else {
+			err = EXT_INODE_HDR_NEED_GROW;
+			goto out;
+		}
+	} else {
+		eh = curp->p_hdr;
+		if (curp->p_idx == NULL) {
+			ix = EXT_FIRST_INDEX(eh);
+			curp->p_idx = ix;
+		} else if (insert_index > to_le32(curp->p_idx->ei_block)) {
+			/* insert after */
+			ix = curp->p_idx + 1;
+		} else {
+			/* insert before */
+			ix = curp->p_idx;
+		}
+	}
+
+	len = EXT_LAST_INDEX(eh) - ix + 1;
+	ext4_assert(len >= 0);
+	if (len > 0)
+		memmove(ix + 1, ix, len * sizeof(struct ext4_extent_idx));
+
+	if (ix > EXT_MAX_INDEX(eh)) {
+		err = EIO;
+		goto out;
+	}
+
+	ix->ei_block = to_le32(insert_index);
+	ext4_idx_store_pblock(ix, insert_block);
+	eh->eh_entries = to_le16(to_le16(eh->eh_entries) + 1);
+
+	if (ix > EXT_LAST_INDEX(eh)) {
+		err = EIO;
+		goto out;
+	}
+
+	if (eh == curp->p_hdr)
+		err = __ext4_ext_dirty(inode_ref, curp);
+	else
+		err = 0;
+
+out:
+	if (err) {
+		if (bh.lb_id)
+			ext4_block_set(inode_ref->fs->bdev, &bh);
+
+		spt->ptr = 0;
+	} else if (bh.lb_id) {
+		/* If we got a sibling leaf. */
+		bh.dirty = true;
+
+		spt->path.p_block = ext4_idx_pblock(ix);
+		spt->path.p_depth = to_le16(eh->eh_depth);
+		spt->path.p_maxdepth = 0;
+		spt->path.p_ext = NULL;
+		spt->path.p_idx = ix;
+		spt->path.p_hdr = eh;
+		spt->path.p_bh = bh;
+
+		if (switch_to)
+			spt->switch_to = 1;
+		else {
+			curp->p_idx = ix;
+			curp->p_block = ext4_idx_pblock(ix);
+		}
+	
+	} else {
+		spt->ptr = 0;
+		curp->p_idx = ix;
+		curp->p_block = ext4_idx_pblock(ix);
+	}
+	return err;
+
+}
+
+/*
+ * ext4_ext_correct_indexes:
+ * if leaf gets modified and modified extent is first in the leaf,
+ * then we have to correct all indexes above.
+ */
+static int ext4_ext_correct_indexes(struct ext4_inode_ref *inode_ref,
+				    struct ext4_ext_path *path)
+{
+	struct ext4_extent_header *eh;
+	int depth = ext_depth(inode_ref->inode);
+	struct ext4_extent *ex;
+	uint32_t border;
+	int k, err = EOK;
+
+	eh = path[depth].p_hdr;
+	ex = path[depth].p_ext;
+
+	if (ex == NULL || eh == NULL) {
+		return EIO;
+	}
+
+	if (depth == 0) {
+		/* there is no tree at all */
 		return EOK;
 	}
 
-	struct ext4_block block;
-	block.lb_id = 0;
-
-	/* Walk through extent tree */
-	struct ext4_extent_header *header =
-	    ext4_inode_get_extent_header(inode_ref->inode);
-
-	while (ext4_extent_header_get_depth(header) != 0) {
-		/* Search index in node */
-		struct ext4_extent_index *index;
-		ext4_extent_binsearch_idx(header, &index, iblock);
-
-		/* Load child node and set values for the next iteration */
-		uint64_t child = ext4_extent_index_get_leaf(index);
-
-		if (block.lb_id) {
-			rc = ext4_block_set(inode_ref->fs->bdev, &block);
-			if (rc != EOK)
-				return rc;
-		}
-
-		int rc = ext4_block_get(inode_ref->fs->bdev, &block, child);
-		if (rc != EOK)
-			return rc;
-
-		header = (struct ext4_extent_header *)block.data;
+	if (ex != EXT_FIRST_EXTENT(eh)) {
+		/* we correct tree if first leaf got modified only */
+		return EOK;
 	}
 
-	/* Search extent in the leaf block */
-	struct ext4_extent *extent = NULL;
-	ext4_extent_binsearch(header, &extent, iblock);
-
-	/* Prevent empty leaf */
-	if (extent == NULL) {
-		*fblock = 0;
-	} else {
-		/* Compute requested physical block address */
-		uint32_t phys_block;
-		uint32_t first = ext4_extent_get_first_block(extent);
-		phys_block = ext4_extent_get_start(extent) + iblock - first;
-
-		*fblock = phys_block;
-	}
-
-	/* Cleanup */
-	if (block.lb_id) {
-		rc = ext4_block_set(inode_ref->fs->bdev, &block);
-		if (rc != EOK)
-			return rc;
-	}
-
-	return EOK;
-}
-
-/**@brief Find extent for specified iblock.
- * This function is used for finding block in the extent tree with
- * saving the path through the tree for possible future modifications.
- * @param inode_ref I-node to read extent tree from
- * @param iblock    Iblock to find extent for
- * @param ret_path  Output value for loaded path from extent tree
- * @return Error code */
-static int ext4_extent_find_extent(struct ext4_inode_ref *inode_ref,
-				   uint32_t iblock,
-				   struct ext4_extent_path **ret_path)
-{
-	struct ext4_extent_header *eh =
-	    ext4_inode_get_extent_header(inode_ref->inode);
-
-	uint16_t depth = ext4_extent_header_get_depth(eh);
-	uint16_t i;
-	struct ext4_extent_path *tmp_path;
-
-	/* Added 2 for possible tree growing */
-	tmp_path = malloc(sizeof(struct ext4_extent_path) * (depth + 2));
-	if (tmp_path == NULL)
-		return ENOMEM;
-
-	/* Initialize structure for algorithm start */
-	tmp_path[0].block = inode_ref->block;
-	tmp_path[0].header = eh;
-
-	/* Walk through the extent tree */
-	uint16_t pos = 0;
-	int rc;
-	while (ext4_extent_header_get_depth(eh) != 0) {
-		/* Search index in index node by iblock */
-		ext4_extent_binsearch_idx(tmp_path[pos].header,
-					  &tmp_path[pos].index, iblock);
-
-		tmp_path[pos].depth = depth;
-		tmp_path[pos].extent = NULL;
-
-		ext4_assert(tmp_path[pos].index != 0);
-
-		/* Load information for the next iteration */
-		uint64_t fblock =
-		    ext4_extent_index_get_leaf(tmp_path[pos].index);
-
-		struct ext4_block block;
-		rc = ext4_block_get(inode_ref->fs->bdev, &block, fblock);
-		if (rc != EOK)
-			goto cleanup;
-
-		pos++;
-
-		eh = (struct ext4_extent_header *)block.data;
-		tmp_path[pos].block = block;
-		tmp_path[pos].header = eh;
-	}
-
-	tmp_path[pos].depth = 0;
-	tmp_path[pos].extent = NULL;
-	tmp_path[pos].index = NULL;
-
-	/* Find extent in the leaf node */
-	ext4_extent_binsearch(tmp_path[pos].header, &tmp_path[pos].extent,
-			      iblock);
-	*ret_path = tmp_path;
-
-	return EOK;
-
-cleanup:
 	/*
-	 * Put loaded blocks
-	 * From 1: 0 is a block with inode data
+	 * TODO: we need correction if border is smaller than current one
 	 */
-	for (i = 1; i < tmp_path->depth; ++i) {
-		if (tmp_path[i].block.lb_id) {
-			int r = ext4_block_set(inode_ref->fs->bdev,
-					       &tmp_path[i].block);
-			if (r != EOK)
-				rc = r;
-		}
+	k = depth - 1;
+	border = path[depth].p_ext->ee_block;
+	path[k].p_idx->ei_block = border;
+	err = __ext4_ext_dirty(inode_ref, path + k);
+	if (err)
+		return err;
+
+	while (k--) {
+		/* change all left-side indexes */
+		if (path[k+1].p_idx != EXT_FIRST_INDEX(path[k+1].p_hdr))
+			break;
+		path[k].p_idx->ei_block = border;
+		err = __ext4_ext_dirty(inode_ref, path + k);
+		if (err)
+			break;
 	}
 
-	/* Destroy temporary data structure */
-	free(tmp_path);
-
-	return rc;
+	return err;
 }
 
-/**@brief Release extent and all data blocks covered by the extent.
- * @param inode_ref I-node to release extent and block from
- * @param extent    Extent to release
- * @return Error code */
-static int ext4_extent_release(struct ext4_inode_ref *inode_ref,
-			       struct ext4_extent *extent)
+static inline int ext4_ext_can_prepend(struct ext4_extent *ex1, struct ext4_extent *ex2)
 {
-	/* Compute number of the first physical block to release */
-	uint64_t start = ext4_extent_get_start(extent);
-	uint16_t block_count = ext4_extent_get_block_count(extent);
+	if (ext4_ext_pblock(ex2) + ext4_ext_get_actual_len(ex2)
+		!= ext4_ext_pblock(ex1))
+		return 0;
 
-	return ext4_balloc_free_blocks(inode_ref, start, block_count);
+#ifdef AGGRESSIVE_TEST
+	if (ext4_ext_get_actual_len(ex1) + ext4_ext_get_actual_len(ex2) > 4)
+		return 0;
+#else
+	if (ext4_ext_is_unwritten(ex1)) {
+		if (ext4_ext_get_actual_len(ex1) + ext4_ext_get_actual_len(ex2)
+				> EXT_UNWRITTEN_MAX_LEN)
+			return 0;
+	} else if (ext4_ext_get_actual_len(ex1) + ext4_ext_get_actual_len(ex2)
+				> EXT_INIT_MAX_LEN)
+		return 0;
+#endif
+
+	if (to_le32(ex2->ee_block) + ext4_ext_get_actual_len(ex2) !=
+			to_le32(ex1->ee_block))
+		return 0;
+
+	return 1;
 }
 
-/** Recursively release the whole branch of the extent tree.
- * For each entry of the node release the subbranch and finally release
- * the node. In the leaf node all extents will be released.
- * @param inode_ref I-node where the branch is released
- * @param index     Index in the non-leaf node to be released
- *                  with the whole subtree
- * @return Error code */
-static int ext4_extent_release_branch(struct ext4_inode_ref *inode_ref,
-				      struct ext4_extent_index *index)
+static inline int ext4_ext_can_append(struct ext4_extent *ex1, struct ext4_extent *ex2)
 {
-	uint32_t fblock = ext4_extent_index_get_leaf(index);
-	uint32_t i;
-	struct ext4_block block;
-	int rc = ext4_block_get(inode_ref->fs->bdev, &block, fblock);
-	if (rc != EOK)
-		return rc;
+	if (ext4_ext_pblock(ex1) + ext4_ext_get_actual_len(ex1)
+		!= ext4_ext_pblock(ex2))
+		return 0;
 
-	struct ext4_extent_header *header = (void *)block.data;
+#ifdef AGGRESSIVE_TEST
+	if (ext4_ext_get_actual_len(ex1) + ext4_ext_get_actual_len(ex2) > 4)
+		return 0;
+#else
+	if (ext4_ext_is_unwritten(ex1)) {
+		if (ext4_ext_get_actual_len(ex1) + ext4_ext_get_actual_len(ex2)
+				> EXT_UNWRITTEN_MAX_LEN)
+			return 0;
+	} else if (ext4_ext_get_actual_len(ex1) + ext4_ext_get_actual_len(ex2)
+				> EXT_INIT_MAX_LEN)
+		return 0;
+#endif
 
-	if (ext4_extent_header_get_depth(header)) {
-		/* The node is non-leaf, do recursion */
-		struct ext4_extent_index *idx = EXT4_EXTENT_FIRST_INDEX(header);
+	if (to_le32(ex1->ee_block) + ext4_ext_get_actual_len(ex1) !=
+			to_le32(ex2->ee_block))
+		return 0;
 
-		/* Release all subbranches */
-		for (i = 0; i < ext4_extent_header_get_entries_count(header);
-		     ++i, ++idx) {
-			rc = ext4_extent_release_branch(inode_ref, idx);
-			if (rc != EOK)
-				return rc;
-		}
-	} else {
-		/* Leaf node reached */
-		struct ext4_extent *ext = EXT4_EXTENT_FIRST(header);
-
-		/* Release all extents and stop recursion */
-		for (i = 0; i < ext4_extent_header_get_entries_count(header);
-		     ++i, ++ext) {
-			rc = ext4_extent_release(inode_ref, ext);
-			if (rc != EOK)
-				return rc;
-		}
-	}
-
-	/* Release data block where the node was stored */
-
-	rc = ext4_block_set(inode_ref->fs->bdev, &block);
-	if (rc != EOK)
-		return rc;
-
-	return ext4_balloc_free_block(inode_ref, fblock);
+	return 1;
 }
 
-int ext4_extent_release_blocks_from(struct ext4_inode_ref *inode_ref,
-				    uint32_t iblock_from)
+static int ext4_ext_insert_leaf(struct ext4_inode_ref *inode_ref,
+			       struct ext4_ext_path *path,
+			       int at,
+			       struct ext4_extent *newext,
+			       struct ext_split_trans *spt)
 {
-	/* Find the first extent to modify */
-	struct ext4_extent_path *path;
-	uint16_t i;
-	int rc = ext4_extent_find_extent(inode_ref, iblock_from, &path);
-	if (rc != EOK)
-		return rc;
+	int switch_to = 0;
+	struct ext4_ext_path *curp = path + at;
+	struct ext4_extent *ex = curp->p_ext;
+	struct ext4_block bh;
+	int len, err = EOK, unwritten;
+	struct ext4_extent_header *eh;
 
-	/* Jump to last item of the path (extent) */
-	struct ext4_extent_path *path_ptr = path;
-	while (path_ptr->depth != 0)
-		path_ptr++;
+	if (curp->p_ext &&
+		to_le32(newext->ee_block) == to_le32(curp->p_ext->ee_block))
+		return EIO;
 
-	ext4_assert(path_ptr->extent != NULL);
+	if (curp->p_ext && ext4_ext_can_append(curp->p_ext, newext)) {
+		unwritten = ext4_ext_is_unwritten(curp->p_ext);
+		curp->p_ext->ee_len = to_le16(ext4_ext_get_actual_len(curp->p_ext)
+			+ ext4_ext_get_actual_len(newext));
+		if (unwritten)
+			ext4_ext_mark_unwritten(curp->p_ext);
+		err = __ext4_ext_dirty(inode_ref, curp);
+		goto out;
 
-	/* First extent maybe released partially */
-	uint32_t first_iblock = ext4_extent_get_first_block(path_ptr->extent);
-	uint32_t first_fblock = ext4_extent_get_start(path_ptr->extent) +
-				iblock_from - first_iblock;
-
-	uint16_t block_count = ext4_extent_get_block_count(path_ptr->extent);
-
-	uint16_t delete_count =
-	    block_count -
-	    (ext4_extent_get_start(path_ptr->extent) - first_fblock);
-
-	/* Release all blocks */
-	rc = ext4_balloc_free_blocks(inode_ref, first_fblock, delete_count);
-	if (rc != EOK)
-		goto cleanup;
-
-	/* Correct counter */
-	block_count -= delete_count;
-	ext4_extent_set_block_count(path_ptr->extent, block_count,
-				EXT4_EXT_IS_UNWRITTEN(path_ptr->extent));
-
-	/* Initialize the following loop */
-	uint16_t entries =
-	    ext4_extent_header_get_entries_count(path_ptr->header);
-	struct ext4_extent *tmp_ext = path_ptr->extent + 1;
-	struct ext4_extent *stop_ext =
-	    EXT4_EXTENT_FIRST(path_ptr->header) + entries;
-
-	/* If first extent empty, release it */
-	if (block_count == 0)
-		entries--;
-
-	/* Release all successors of the first extent in the same node */
-	while (tmp_ext < stop_ext) {
-		first_fblock = ext4_extent_get_start(tmp_ext);
-		delete_count = ext4_extent_get_block_count(tmp_ext);
-
-		rc = ext4_balloc_free_blocks(inode_ref, first_fblock,
-					     delete_count);
-		if (rc != EOK)
-			goto cleanup;
-
-		entries--;
-		tmp_ext++;
 	}
 
-	ext4_extent_header_set_entries_count(path_ptr->header, entries);
-	path_ptr->block.dirty = true;
+	if (curp->p_ext && ext4_ext_can_prepend(curp->p_ext, newext)) {
+		unwritten = ext4_ext_is_unwritten(curp->p_ext);
+		curp->p_ext->ee_block = newext->ee_block;
+		curp->p_ext->ee_len = to_le16(ext4_ext_get_actual_len(curp->p_ext)
+			+ ext4_ext_get_actual_len(newext));
+		if (unwritten)
+			ext4_ext_mark_unwritten(curp->p_ext);
+		err = __ext4_ext_dirty(inode_ref, curp);
+		goto out;
 
-	/* If leaf node is empty, parent entry must be modified */
-	bool remove_parent_record = false;
-
-	/* Don't release root block (including inode data) !!! */
-	if ((path_ptr != path) && (entries == 0)) {
-		rc = ext4_balloc_free_block(inode_ref, path_ptr->block.lb_id);
-		if (rc != EOK)
-			goto cleanup;
-
-		remove_parent_record = true;
 	}
 
-	/* Jump to the parent */
-	--path_ptr;
+	if (to_le16(curp->p_hdr->eh_entries)
+			     == to_le16(curp->p_hdr->eh_max)) {
+		if (at) {
+			struct ext4_extent_header *neh;
+			err = ext4_ext_split_node(inode_ref, path, at,
+						  newext, &spt->ptr, &bh);
+			if (err)
+				goto out;
 
-	/* Release all successors in all tree levels */
-	while (path_ptr >= path) {
-		entries =
-		    ext4_extent_header_get_entries_count(path_ptr->header);
-		struct ext4_extent_index *index = path_ptr->index + 1;
-		struct ext4_extent_index *stop =
-		    EXT4_EXTENT_FIRST_INDEX(path_ptr->header) + entries;
-
-		/* Correct entries count because of changes in the previous
-		 * iteration */
-		if (remove_parent_record)
-			entries--;
-
-		/* Iterate over all entries and release the whole subtrees */
-		while (index < stop) {
-			rc = ext4_extent_release_branch(inode_ref, index);
-			if (rc != EOK)
-				goto cleanup;
-
-			++index;
-			--entries;
-		}
-
-		ext4_extent_header_set_entries_count(path_ptr->header, entries);
-		path_ptr->block.dirty = true;
-
-		/* Free the node if it is empty */
-		if ((entries == 0) && (path_ptr != path)) {
-			rc = ext4_balloc_free_block(inode_ref,
-						    path_ptr->block.lb_id);
-			if (rc != EOK)
-				goto cleanup;
-
-			/* Mark parent to be checked */
-			remove_parent_record = true;
-		} else
-			remove_parent_record = false;
-
-		--path_ptr;
-	}
-
-	if (!entries)
-		ext4_extent_header_set_depth(path->header, 0);
-
-cleanup:
-	/*
-	 * Put loaded blocks
-	 * starting from 1: 0 is a block with inode data
-	 */
-	for (i = 1; i <= path->depth; ++i) {
-		if (path[i].block.lb_id) {
-			int r =
-			    ext4_block_set(inode_ref->fs->bdev, &path[i].block);
-			if (r != EOK)
-				rc = r;
-		}
-	}
-
-	/* Destroy temporary data structure */
-	free(path);
-
-	return rc;
-}
-
-/**@brief Append new extent to the i-node and do some splitting if necessary.
- * @param inode_ref      I-node to append extent to
- * @param path           Path in the extent tree for possible splitting
- * @param last_path_item Input/output parameter for pointer to the last
- *                       valid item in the extent tree path
- * @param iblock         Logical index of block to append extent for
- * @return Error code */
-static int ext4_extent_append_extent(struct ext4_inode_ref *inode_ref,
-				     struct ext4_extent_path *path,
-				     uint32_t iblock)
-{
-	struct ext4_extent_path *path_ptr = path + path->depth;
-
-	uint32_t block_size = ext4_sb_get_block_size(&inode_ref->fs->sb);
-
-	/* Start splitting */
-	while (path_ptr > path) {
-		uint16_t entries =
-		    ext4_extent_header_get_entries_count(path_ptr->header);
-		uint16_t limit =
-		    ext4_extent_header_get_max_entries_count(path_ptr->header);
-
-		if (entries == limit) {
-			/* Full node - allocate block for new one */
-			uint32_t fblock;
-			int rc = ext4_balloc_alloc_block(inode_ref, &fblock);
-			if (rc != EOK)
-				return rc;
-
-			struct ext4_block block;
-			rc =
-			    ext4_block_get(inode_ref->fs->bdev, &block, fblock);
-			if (rc != EOK) {
-				ext4_balloc_free_block(inode_ref, fblock);
-				return rc;
-			}
-
-			/* Put back not modified old block */
-			rc = ext4_block_set(inode_ref->fs->bdev,
-					    &path_ptr->block);
-			if (rc != EOK) {
-				ext4_balloc_free_block(inode_ref, fblock);
-				return rc;
-			}
-
-			/* Initialize newly allocated block and remember it */
-			memset(block.data, 0, block_size);
-			path_ptr->block = block;
-
-			/* Update pointers in extent path structure */
-			path_ptr->header = (void *)block.data;
-			if (path_ptr->depth) {
-				path_ptr->index =
-				    EXT4_EXTENT_FIRST_INDEX(path_ptr->header);
-				ext4_extent_index_set_first_block(
-				    path_ptr->index, iblock);
-				ext4_extent_index_set_leaf(
-				    path_ptr->index,
-				    (path_ptr + 1)->block.lb_id);
-				limit = (block_size -
-					 sizeof(struct ext4_extent_header)) /
-					sizeof(struct ext4_extent_index);
+			neh = ext_block_hdr(&bh);
+			if (to_le32(newext->ee_block) >
+				to_le32(curp->p_ext->ee_block)) {
+				if (to_le16(neh->eh_entries) >
+					to_le16(curp->p_hdr->eh_entries)) {
+					eh = curp->p_hdr;
+					/* insert after */
+					ex = EXT_LAST_EXTENT(eh) + 1;
+				} else {
+					eh = neh;
+					ex = EXT_FIRST_EXTENT(eh);
+					switch_to = 1;
+				}
 			} else {
-				path_ptr->extent =
-				    EXT4_EXTENT_FIRST(path_ptr->header);
-				ext4_extent_set_first_block(path_ptr->extent,
-							    iblock);
-				limit = (block_size -
-					 sizeof(struct ext4_extent_header)) /
-					sizeof(struct ext4_extent);
+				eh = curp->p_hdr;
+				/* insert before */
+				ex = EXT_LAST_EXTENT(eh);
 			}
-
-			/* Initialize on-disk structure (header) */
-			ext4_extent_header_set_entries_count(path_ptr->header,
-							     1);
-			ext4_extent_header_set_max_entries_count(
-			    path_ptr->header, limit);
-			ext4_extent_header_set_magic(path_ptr->header,
-						     EXT4_EXTENT_MAGIC);
-			ext4_extent_header_set_depth(path_ptr->header,
-						     path_ptr->depth);
-			ext4_extent_header_set_generation(path_ptr->header, 0);
-
-			path_ptr->block.dirty = true;
-
-			/* Jump to the preceding item */
-			path_ptr--;
 		} else {
-			/* Node with free space */
-			if (path_ptr->depth) {
-				path_ptr->index =
-				    EXT4_EXTENT_FIRST_INDEX(path_ptr->header) +
-				    entries;
-				ext4_extent_index_set_first_block(
-				    path_ptr->index, iblock);
-				ext4_extent_index_set_leaf(
-				    path_ptr->index,
-				    (path_ptr + 1)->block.lb_id);
-			} else {
-				path_ptr->extent =
-				    EXT4_EXTENT_FIRST(path_ptr->header) +
-				    entries;
-				ext4_extent_set_first_block(path_ptr->extent,
-							    iblock);
-			}
-
-			ext4_extent_header_set_entries_count(path_ptr->header,
-							     entries + 1);
-			path_ptr->block.dirty = true;
-
-			/* No more splitting needed */
-			return EOK;
+			err = EXT_INODE_HDR_NEED_GROW;
+			goto out;
 		}
-	}
-
-	ext4_assert(path_ptr == path);
-
-	/* Should be the root split too? */
-
-	uint16_t entries = ext4_extent_header_get_entries_count(path->header);
-	uint16_t limit = ext4_extent_header_get_max_entries_count(path->header);
-
-	if (entries == limit) {
-		uint32_t new_fblock;
-		int rc = ext4_balloc_alloc_block(inode_ref, &new_fblock);
-		if (rc != EOK)
-			return rc;
-
-		struct ext4_block block;
-		rc = ext4_block_get(inode_ref->fs->bdev, &block, new_fblock);
-		if (rc != EOK)
-			return rc;
-
-		/* Initialize newly allocated block */
-		memset(block.data, 0, block_size);
-
-		/* Move data from root to the new block */
-		memcpy(block.data, inode_ref->inode->blocks,
-		       EXT4_INODE_BLOCKS * sizeof(uint32_t));
-
-		/* Data block is initialized */
-
-		struct ext4_block *root_block = &path->block;
-		uint16_t root_depth = path->depth;
-		struct ext4_extent_header *root_header = path->header;
-
-		/* Make space for tree growing */
-		struct ext4_extent_path *new_root = path;
-		struct ext4_extent_path *old_root = path + 1;
-
-		size_t nbytes =
-		    sizeof(struct ext4_extent_path) * (path->depth + 1);
-		memmove(old_root, new_root, nbytes);
-		memset(new_root, 0, sizeof(struct ext4_extent_path));
-
-		/* Update old root structure */
-		old_root->block = block;
-		old_root->header = (struct ext4_extent_header *)block.data;
-
-		/* Add new entry and update limit for entries */
-		if (old_root->depth) {
-			limit =
-			    (block_size - sizeof(struct ext4_extent_header)) /
-			    sizeof(struct ext4_extent_index);
-			old_root->index =
-			    EXT4_EXTENT_FIRST_INDEX(old_root->header) + entries;
-			ext4_extent_index_set_first_block(old_root->index,
-							  iblock);
-			ext4_extent_index_set_leaf(old_root->index,
-						   (old_root + 1)->block.lb_id);
-			old_root->extent = NULL;
-		} else {
-			limit =
-			    (block_size - sizeof(struct ext4_extent_header)) /
-			    sizeof(struct ext4_extent);
-			old_root->extent =
-			    EXT4_EXTENT_FIRST(old_root->header) + entries;
-			ext4_extent_set_first_block(old_root->extent, iblock);
-			old_root->index = NULL;
-		}
-
-		ext4_extent_header_set_entries_count(old_root->header,
-						     entries + 1);
-		ext4_extent_header_set_max_entries_count(old_root->header,
-							 limit);
-
-		old_root->block.dirty = true;
-
-		/* Re-initialize new root metadata */
-		new_root->depth = root_depth + 1;
-		new_root->block = *root_block;
-		new_root->header = root_header;
-		new_root->extent = NULL;
-		new_root->index = EXT4_EXTENT_FIRST_INDEX(new_root->header);
-
-		ext4_extent_header_set_depth(new_root->header, new_root->depth);
-
-		/* Create new entry in root */
-		ext4_extent_header_set_entries_count(new_root->header, 1);
-		ext4_extent_index_set_first_block(new_root->index, 0);
-		ext4_extent_index_set_leaf(new_root->index, new_fblock);
-
-		new_root->block.dirty = true;
 	} else {
-		if (path->depth) {
-			path->index =
-			    EXT4_EXTENT_FIRST_INDEX(path->header) + entries;
-			ext4_extent_index_set_first_block(path->index, iblock);
-			ext4_extent_index_set_leaf(path->index,
-						   (path + 1)->block.lb_id);
+		eh = curp->p_hdr;
+		if (curp->p_ext == NULL) {
+			ex = EXT_FIRST_EXTENT(eh);
+			curp->p_ext = ex;
+		} else if (to_le32(newext->ee_block) >
+				to_le32(curp->p_ext->ee_block)) {
+			/* insert after */
+			ex = curp->p_ext + 1;
 		} else {
-			path->extent =
-			    EXT4_EXTENT_FIRST(path->header) + entries;
-			ext4_extent_set_first_block(path->extent, iblock);
+			/* insert before */
+			ex = curp->p_ext;
 		}
-
-		ext4_extent_header_set_entries_count(path->header, entries + 1);
-		path->block.dirty = true;
 	}
 
-	return EOK;
+	len = EXT_LAST_EXTENT(eh) - ex + 1;
+	ext4_assert(len >= 0);
+	if (len > 0)
+		memmove(ex + 1, ex, len * sizeof(struct ext4_extent));
+
+	if (ex > EXT_MAX_EXTENT(eh)) {
+		err = EIO;
+		goto out;
+	}
+
+	ex->ee_block = newext->ee_block;
+	ex->ee_len = newext->ee_len;
+	ext4_ext_store_pblock(ex, ext4_ext_pblock(newext));
+	eh->eh_entries = to_le16(to_le16(eh->eh_entries) + 1);
+
+	if (ex > EXT_LAST_EXTENT(eh)) {
+		err = EIO;
+		goto out;
+	}
+
+	if (eh == curp->p_hdr) {
+		err = ext4_ext_correct_indexes(inode_ref, path);
+		if (err)
+			goto out;
+		err = __ext4_ext_dirty(inode_ref, curp);
+	} else
+		err = 0;
+
+out:
+	if (err) {
+		if (bh.lb_id)
+			ext4_block_set(inode_ref->fs->bdev,
+					&bh);
+
+		spt->ptr = 0;
+	} else if (bh.lb_id) {
+		/* If we got a sibling leaf. */
+		bh.dirty = true;
+
+		spt->path.p_block = ext4_ext_pblock(ex);
+		spt->path.p_depth = to_le16(eh->eh_depth);
+		spt->path.p_maxdepth = 0;
+		spt->path.p_ext = ex;
+		spt->path.p_idx = NULL;
+		spt->path.p_hdr = eh;
+		spt->path.p_bh = bh;
+
+		if (switch_to)
+			spt->switch_to = 1;
+		else {
+			curp->p_ext = ex;
+			curp->p_block = ext4_ext_pblock(ex);
+		}
+
+	} else {
+		spt->ptr = 0;
+		curp->p_ext = ex;
+		curp->p_block = ext4_ext_pblock(ex);
+	}
+
+	return err;
+
 }
 
-int ext4_extent_append_block(struct ext4_inode_ref *inode_ref, uint32_t *iblock,
-			     uint32_t *fblock, bool update_size)
-{
-	uint16_t i;
-	struct ext4_sblock *sb = &inode_ref->fs->sb;
-	uint64_t inode_size = ext4_inode_get_size(sb, inode_ref->inode);
-	uint32_t block_size = ext4_sb_get_block_size(sb);
-
-	/* Calculate number of new logical block */
-	uint32_t new_block_idx = 0;
-	if (inode_size > 0) {
-		if ((inode_size % block_size) != 0)
-			inode_size += block_size - (inode_size % block_size);
-
-		new_block_idx = inode_size / block_size;
-	}
-
-	/* Load the nearest leaf (with extent) */
-	struct ext4_extent_path *path;
-	int rc = ext4_extent_find_extent(inode_ref, new_block_idx, &path);
-	if (rc != EOK)
-		return rc;
-
-	/* Jump to last item of the path (extent) */
-	struct ext4_extent_path *path_ptr = path;
-	while (path_ptr->depth != 0)
-		path_ptr++;
-
-	/* Add new extent to the node if not present */
-	if (path_ptr->extent == NULL)
-		goto append_extent;
-
-	uint16_t block_count = ext4_extent_get_block_count(path_ptr->extent);
-	uint16_t block_limit = (1 << 15);
-
-	uint32_t phys_block = 0;
-	if (block_count < block_limit) {
-		/* There is space for new block in the extent */
-		if (block_count == 0) {
-			/* Existing extent is empty */
-			rc = ext4_balloc_alloc_block(inode_ref, &phys_block);
-			if (rc != EOK)
-				goto finish;
-
-			/* Initialize extent */
-			ext4_extent_set_first_block(path_ptr->extent,
-						    new_block_idx);
-			ext4_extent_set_start(path_ptr->extent, phys_block);
-			ext4_extent_set_block_count(path_ptr->extent, 1,
-						false);
-
-			/* Update i-node */
-			if (update_size) {
-				ext4_inode_set_size(inode_ref->inode,
-						    inode_size + block_size);
-				inode_ref->dirty = true;
-			}
-
-			path_ptr->block.dirty = true;
-
-			goto finish;
-		} else {
-			/* Existing extent contains some blocks */
-			phys_block = ext4_extent_get_start(path_ptr->extent);
-			phys_block +=
-			    ext4_extent_get_block_count(path_ptr->extent);
-
-			/* Check if the following block is free for allocation
-			 */
-			bool free;
-			rc = ext4_balloc_try_alloc_block(inode_ref, phys_block,
-							 &free);
-			if (rc != EOK)
-				goto finish;
-
-			if (!free) {
-				/* Target is not free, new block must be
-				 * appended to new extent
-				 */
-				goto append_extent;
-			}
-
-			/* Update extent */
-			ext4_extent_set_block_count(path_ptr->extent,
-						    block_count + 1,
-						    false);
-
-			/* Update i-node */
-			if (update_size) {
-				ext4_inode_set_size(inode_ref->inode,
-						    inode_size + block_size);
-				inode_ref->dirty = true;
-			}
-
-			path_ptr->block.dirty = true;
-
-			goto finish;
-		}
-	}
-
-append_extent:
-	/* Append new extent to the tree */
-	phys_block = 0;
-
-	/* Allocate new data block */
-	rc = ext4_balloc_alloc_block(inode_ref, &phys_block);
-	if (rc != EOK)
-		goto finish;
-
-	/* Append extent for new block (includes tree splitting if needed) */
-	rc = ext4_extent_append_extent(inode_ref, path, new_block_idx);
-	if (rc != EOK) {
-		ext4_balloc_free_block(inode_ref, phys_block);
-		goto finish;
-	}
-
-	uint32_t tree_depth = ext4_extent_header_get_depth(path->header);
-	path_ptr = path + tree_depth;
-
-	/* Initialize newly created extent */
-	ext4_extent_set_block_count(path_ptr->extent, 1, false);
-	ext4_extent_set_first_block(path_ptr->extent, new_block_idx);
-	ext4_extent_set_start(path_ptr->extent, phys_block);
-
-	/* Update i-node */
-	if (update_size) {
-		ext4_inode_set_size(inode_ref->inode, inode_size + block_size);
-		inode_ref->dirty = true;
-	}
-
-	path_ptr->block.dirty = true;
-
-finish:
-	/* Set return values */
-	*iblock = new_block_idx;
-	*fblock = phys_block;
-
-	/*
-	 * Put loaded blocks
-	 * starting from 1: 0 is a block with inode data
-	 */
-	for (i = 1; i <= path->depth; ++i) {
-		if (path[i].block.lb_id) {
-			int r =
-			    ext4_block_set(inode_ref->fs->bdev, &path[i].block);
-			if (r != EOK)
-				rc = r;
-		}
-	}
-
-	/* Destroy temporary data structure */
-	free(path);
-
-	return rc;
-}
-
-/**
- * @}
+/*
+ * ext4_ext_grow_indepth:
+ * implements tree growing procedure:
+ * - allocates new block
+ * - moves top-level data (index block or leaf) into the new block
+ * - initializes new top-level, creating index that points to the
+ *   just created block
  */
+static int ext4_ext_grow_indepth(struct ext4_inode_ref *inode_ref,
+				 unsigned int flags)
+{
+	struct ext4_extent_header *neh;
+	struct ext4_block bh;
+	ext4_fsblk_t newblock, goal = 0;
+	int err = EOK;
+
+	/* Try to prepend new index to old one */
+	if (ext_depth(inode_ref->inode))
+		goal = ext4_idx_pblock(EXT_FIRST_INDEX(ext_inode_hdr(inode_ref->inode)));
+	else
+		goal = ext4_inode_to_goal_block(inode);
+
+	newblock = ext4_new_meta_blocks(inode_ref, goal, flags,
+					NULL, &err);
+	if (newblock == 0)
+		return err;
+
+	/* # */
+	err = ext4_block_get(inode_ref->fs->bdev, &bh, newblock);
+	if (err != EOK) {
+		ext4_ext_free_blocks(inode_ref, newblock, 1, 0);
+		return err;
+	}
+
+	/* move top-level index/leaf into new block */
+	memmove(bh.data, inode_ref->inode->blocks,
+		sizeof(inode_ref->inode->blocks));
+
+	/* set size of new block */
+	neh = ext_block_hdr(&bh);
+	/* old root could have indexes or leaves
+	 * so calculate e_max right way */
+	if (ext_depth(inode_ref->inode))
+		neh->eh_max = to_le16(ext4_ext_space_block_idx(inode_ref, 0));
+	else
+		neh->eh_max = to_le16(ext4_ext_space_block(inode_ref, 0));
+
+	neh->eh_magic = to_le16(EXT4_EXT_MAGIC);
+	ext4_extent_block_csum_set(inode_ref, neh);
+
+	/* Update top-level index: num,max,pointer */
+	neh = ext_inode_hdr(inode_ref->inode);
+	neh->eh_entries = to_le16(1);
+	ext4_idx_store_pblock(EXT_FIRST_INDEX(neh), newblock);
+	if (neh->eh_depth == 0) {
+		/* Root extent block becomes index block */
+		neh->eh_max = to_le16(ext4_ext_space_root_idx(inode_ref, 0));
+		EXT_FIRST_INDEX(neh)->ei_block =
+			EXT_FIRST_EXTENT(neh)->ee_block;
+	}
+	neh->eh_depth = to_le16(to_le16(neh->eh_depth) + 1);
+
+	bh.dirty = true;
+	inode_ref->dirty = true;
+	ext4_block_set(inode_ref->fs->bdev, &bh);
+
+	return err;
+}
+
+void print_path(struct ext4_ext_path *path)
+{
+	int i = path->p_depth;
+	printf("====================\n");
+	while (i >= 0) {
+		printf("depth %d, p_block: %llu, p_ext offset: %d, p_idx offset: %d\n", i,
+			path->p_block,
+			(path->p_ext)?(path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)):0,
+			(path->p_idx)?(path->p_idx - EXT_FIRST_INDEX(path->p_hdr)):0);
+		i--;
+		path++;
+	}
+}
+
+static inline int
+ext4_ext_replace_path(struct ext4_inode_ref *inode_ref,
+		      struct ext4_ext_path *path,
+		      struct ext_split_trans *spt,
+		      int depth,
+		      int level)
+{
+	int i = depth - level;
+
+	ext4_ext_drop_refs(inode_ref, path + i, 1);
+	path[i] = spt->path;
+}
+
+int ext4_ext_insert_extent(struct ext4_inode_ref *inode_ref,
+		struct ext4_ext_path **ppath,
+		struct ext4_extent *newext)
+{
+	int i, depth, level, ret = EOK;
+	ext4_fsblk_t ptr = 0;
+	struct ext4_ext_path *path = *ppath;
+	struct ext_split_trans *spt = NULL, newblock = {0};
+
+	depth = ext_depth(inode_ref->inode);
+	for (i = depth, level = 0;i >= 0;i--, level++)
+		if (EXT_HAS_FREE_INDEX(path + i))
+			break;
+
+	if (level) {
+		spt = calloc(1, sizeof(struct ext_split_trans) * (level));
+		if (!spt) {
+			ret = ENOMEM;
+			goto out;
+		}
+	}
+	i = 0;
+again:
+	depth = ext_depth(inode_ref->inode);
+
+	do {
+		if (!i) {
+			ret = ext4_ext_insert_leaf(inode_ref,
+					     path, depth - i,
+					     newext, &newblock);
+		} else {
+			ret = ext4_ext_insert_index(inode_ref,
+					     path, depth - i,
+					     newext, ext4_ext_block_index(spt[i-1].path.p_hdr),
+					     spt[i-1].ptr,
+					     &newblock);
+		}
+		ptr = newblock.ptr;
+
+		if (ret && ret != EXT_INODE_HDR_NEED_GROW)
+			goto out;
+		else if (spt && ptr && !ret) {
+			/* Prepare for the next iteration after splitting. */
+			spt[i] = newblock;
+		}
+
+		i++;
+	} while (ptr != 0 && i <= depth);
+	
+	if (ret == EXT_INODE_HDR_NEED_GROW) {
+		ret = ext4_ext_grow_indepth(inode_ref, 0);
+		if (ret)
+			goto out;
+		ret = ext4_find_extent(inode_ref,
+				to_le32(newext->ee_block),
+				ppath, 0);
+		if (ret)
+			goto out;
+		i = depth;
+		path = *ppath;
+		goto again;
+	}
+out:
+	if (ret) {
+		if (path)
+			ext4_ext_drop_refs(inode_ref, path, 0);
+
+		while (--level >= 0 && spt) {
+			if (spt[level].ptr) {
+				ext4_ext_free_blocks(inode_ref,
+					spt[level].ptr, 1, 0);
+				ext4_ext_drop_refs(inode_ref,
+					&spt[level].path, 1);
+			}
+		}
+	} else {
+		while (--level >= 0 && spt) {
+			struct ext4_extent_header *eh;
+			if (spt[level].switch_to)
+				ext4_ext_replace_path(inode_ref,
+						      path,
+						      spt,
+						      depth,
+						      level);
+			else if (spt[level].ptr)
+				ext4_ext_drop_refs(inode_ref,
+					&spt[level].path, 1);
+
+		}
+	}
+	if (spt)
+		free(spt);
+
+	return ret;
+}
+
+static void ext4_ext_remove_blocks(struct ext4_inode_ref *inode_ref,
+				struct ext4_extent *ex,
+				ext4_lblk_t from, ext4_lblk_t to)
+{
+	int len = to - from + 1;
+	ext4_lblk_t num;
+	ext4_fsblk_t start;
+	num = from - to_le32(ex->ee_block);
+	start = ext4_ext_pblock(ex) + num;
+	ext_debug("Freeing %lu at %llu, %d\n", from, start, len);
+	ext4_ext_free_blocks(inode_ref, start, len, 0);
+}
+
+static int ext4_ext_remove_idx(struct ext4_inode_ref *inode_ref,
+		struct ext4_ext_path *path, int depth)
+{
+	int err = EOK, i = depth;
+	ext4_fsblk_t leaf;
+
+	/* free index block */
+	leaf = ext4_idx_pblock(path[i].p_idx);
+
+	if (path[i].p_idx != EXT_LAST_INDEX(path[i].p_hdr)) {
+		int len = EXT_LAST_INDEX(path[i].p_hdr) - path[i].p_idx;
+		memmove(path[i].p_idx, path[i].p_idx + 1,
+			len * sizeof(struct ext4_extent_idx));
+	}
+
+	path[i].p_hdr->eh_entries
+		= to_le16(to_le16(path[i].p_hdr->eh_entries) - 1);
+	err = __ext4_ext_dirty(inode_ref, path + i);
+	if (err)
+		return err;
+
+	ext_debug("IDX: Freeing %lu at %llu, %d\n",
+		to_le32(path[i].p_idx->ei_block), leaf, 1);
+	ext4_ext_free_blocks(inode_ref, leaf, 1, 0);
+
+	while (i > 0) {
+		if (path[i].p_idx != EXT_FIRST_INDEX(path[i].p_hdr))
+			break;
+
+		path[i-1].p_idx->ei_block = path[i].p_idx->ei_block;
+		err = __ext4_ext_dirty(inode_ref, path + i - 1);
+		if (err)
+			break;
+
+		i--;
+	}
+	return err;
+}
+
+static int ext4_ext_remove_leaf(struct ext4_inode_ref *inode_ref,
+		struct ext4_ext_path *path,
+		ext4_lblk_t from, ext4_lblk_t to)
+{
+	
+	int depth = ext_depth(inode_ref->inode);
+	struct ext4_extent *ex = path[depth].p_ext;
+	struct ext4_extent *start_ex, *ex2 = NULL;
+	struct ext4_extent_header *eh = path[depth].p_hdr;
+	int len, err = EOK, new_entries;
+
+	start_ex = ex;
+	new_entries = to_le16(eh->eh_entries);
+	while (ex <= EXT_LAST_EXTENT(path[depth].p_hdr)
+		&& to_le32(ex->ee_block) <= to) {
+		int new_len = 0;
+		int unwritten;
+		ext4_fsblk_t start, new_start;
+		new_start = start = to_le32(ex->ee_block);
+		len = ext4_ext_get_actual_len(ex);
+		if (start < from) {
+			start = from;
+			len -= from - start;
+			new_len = from - start;
+			start_ex++;
+		}
+		if (start + len - 1 > to) {
+			len -= start + len - 1 - to;
+			new_len = start + len - 1 - to;
+			new_start += to + 1;
+			ex2 = ex;
+		}
+
+		ext4_ext_remove_blocks(inode_ref,
+				ex, start, start + len - 1);
+		ex->ee_block = to_le32(new_start);
+		if (!new_len)
+			new_entries--;
+		else {
+			unwritten = ext4_ext_is_unwritten(ex);
+			ex->ee_len = to_le16(new_len);
+			if (unwritten)
+				ext4_ext_mark_unwritten(ex);
+
+		}
+
+		ex += 1;
+	}
+
+	if (ex2 == NULL)
+		ex2 = ex;
+
+	if (ex2 <= EXT_LAST_EXTENT(eh))
+		memmove(start_ex, ex2, EXT_LAST_EXTENT(eh) - ex2 + 1);
+
+	eh->eh_entries = to_le16(new_entries);
+	__ext4_ext_dirty(inode_ref, path + depth);
+	if (path[depth].p_ext == EXT_FIRST_EXTENT(eh)
+		&& eh->eh_entries)
+		err = ext4_ext_correct_indexes(inode_ref, path);
+
+	/* if this leaf is free, then we should
+	 * remove it from index block above */
+	if (err == EOK &&
+		eh->eh_entries == 0 && path[depth].p_bh.lb_id)
+		err = ext4_ext_remove_idx(inode_ref,
+				path, depth - 1);
+
+	return err;
+}
+
+static int inline
+ext4_ext_more_to_rm(struct ext4_ext_path *path, ext4_lblk_t to)
+{
+	if (!to_le16(path->p_hdr->eh_entries))
+		return 0;
+
+	if (path->p_idx > EXT_LAST_INDEX(path->p_hdr))
+		return 0;
+
+	if (to_le32(path->p_idx->ei_block) > to)
+		return 0;
+
+	return 1;
+}
+
+int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref,
+			  ext4_lblk_t from, ext4_lblk_t to)
+{
+	struct ext4_ext_path *path = NULL;
+	int ret = EOK, depth = ext_depth(inode_ref->inode), i;
+
+	ret = ext4_find_extent(inode_ref, from, &path, 0);
+	if (ret)
+		goto out;
+
+	if (!path[depth].p_ext ||
+		!in_range(from, to_le32(path[depth].p_ext->ee_block),
+			 ext4_ext_get_actual_len(path[depth].p_ext))) {
+		ret = 0;
+		goto out;
+	}
+
+	i = depth;
+	while (i >= 0) {
+		if (i == depth) {
+			struct ext4_extent_header *eh;
+			struct ext4_extent *first_ex, *last_ex;
+			ext4_lblk_t leaf_from, leaf_to;
+			eh = path[i].p_hdr;
+			ext4_assert(to_le16(eh->eh_entries) > 0);
+			first_ex = EXT_FIRST_EXTENT(eh);
+			last_ex = EXT_LAST_EXTENT(eh);
+			leaf_from = to_le32(first_ex->ee_block);
+			leaf_to = to_le32(last_ex->ee_block)
+				   + ext4_ext_get_actual_len(last_ex) - 1;
+			if (leaf_from < from)
+				leaf_from = from;
+
+			if (leaf_to > to)
+				leaf_to = to;
+
+			ext4_ext_remove_leaf(inode_ref, path, leaf_from, leaf_to);
+			ext4_ext_drop_refs(inode_ref, path + i, 0);
+			i--;
+			continue;
+		} else {
+			struct ext4_extent_header *eh;
+			eh = path[i].p_hdr;
+			if (ext4_ext_more_to_rm(path + i, to)) {
+				struct ext4_block bh;
+				if (path[i+1].p_bh.lb_id)
+					ext4_ext_drop_refs(inode_ref,
+						path + i + 1, 0);
+
+				ret = read_extent_tree_block(inode_ref,
+					ext4_idx_pblock(path[i].p_idx),
+					depth - i - 1, &bh, 0);
+				if (ret)
+					goto out;
+
+				path[i].p_block = ext4_idx_pblock(path[i].p_idx);
+				path[i+1].p_bh = bh;
+				path[i+1].p_hdr = ext_block_hdr(&bh);
+				path[i+1].p_depth = depth - i - 1;
+				if (i + 1 == depth)
+					path[i+1].p_ext = EXT_FIRST_EXTENT(path[i+1].p_hdr);
+				else
+					path[i+1].p_idx = EXT_FIRST_INDEX(path[i+1].p_hdr);
+
+				i++;
+			} else {
+				if (!eh->eh_entries && i > 0) {
+					
+					ret = ext4_ext_remove_idx(inode_ref, path, i - 1);
+				}
+				if (i) {
+					ext4_block_set(inode_ref->fs->bdev,
+						&path[i].p_bh);
+				}
+				i--;
+			}
+		}
+	}
+
+	/* TODO: flexible tree reduction should be here */
+	if (path->p_depth) {
+		int nr_entries = 0;
+	}
+	if (path->p_hdr->eh_entries == 0) {
+		/*
+		 * truncate to zero freed all the tree,
+		 * so we need to correct eh_depth
+		 */
+		ext_inode_hdr(inode_ref->inode)->eh_depth = 0;
+		ext_inode_hdr(inode_ref->inode)->eh_max =
+			to_le16(ext4_ext_space_root(inode_ref, 0));
+		ret = __ext4_ext_dirty(inode_ref, path);
+	}
+
+out:
+	ext4_ext_drop_refs(inode_ref, path, 0);
+	free(path);
+	path = NULL;
+	return ret;
+}
+
+int ext4_ext_split_extent_at(struct ext4_inode_ref *inode_ref,
+			     struct ext4_ext_path **ppath,
+			     ext4_lblk_t split,
+			     int split_flag,
+			     int flags)
+{
+	struct ext4_extent *ex, newex;
+	ext4_fsblk_t newblock;
+	ext4_lblk_t ee_block;
+	int ee_len;
+	int depth = ext_depth(inode_ref->inode);
+	int err = EOK;
+
+	ex = (*ppath)[depth].p_ext;
+	ee_block = to_le32(ex->ee_block);
+	ee_len = ext4_ext_get_actual_len(ex);
+	newblock = split - ee_block + ext4_ext_pblock(ex);
+	
+	if (split == ee_block) {
+		/*
+		 * case b: block @split is the block that the extent begins with
+		 * then we just change the state of the extent, and splitting
+		 * is not needed.
+		 */
+		if (split_flag & EXT4_EXT_MARK_UNWRIT2)
+			ext4_ext_mark_unwritten(ex);
+		else
+			ext4_ext_mark_initialized(ex);
+
+		err = __ext4_ext_dirty(inode_ref, *ppath + depth);
+		goto out;
+	}
+
+	ex->ee_len = to_le16(split - ee_block);
+	if (split_flag & EXT4_EXT_MARK_UNWRIT1)
+		ext4_ext_mark_unwritten(ex);
+
+	err = __ext4_ext_dirty(inode_ref, *ppath + depth);
+	if (err)
+		goto out;
+
+	newex.ee_block = to_le32(split);
+	newex.ee_len   = to_le16(ee_len - (split - ee_block));
+	ext4_ext_store_pblock(&newex, newblock);
+	if (split_flag & EXT4_EXT_MARK_UNWRIT2)
+		ext4_ext_mark_unwritten(&newex);
+	err = ext4_ext_insert_extent(inode_ref, ppath, &newex);
+	if (err)
+		goto restore_extent_len;
+
+out:
+	return err;
+restore_extent_len:
+	ex->ee_len = to_le16(ee_len);
+	err = __ext4_ext_dirty(inode_ref, *ppath + depth);
+	return err;
+}
+
+static int ext4_ext_convert_to_initialized (
+		struct ext4_inode_ref *inode_ref,
+		struct ext4_ext_path **ppath,
+		ext4_lblk_t split,
+		unsigned long blocks,
+		int flags)
+{
+	int depth = ext_depth(inode_ref->inode), err = EOK;
+	struct ext4_extent *ex = (*ppath)[depth].p_ext;
+
+	ext4_assert(to_le32(ex->ee_block) <= split);
+
+	if (split + blocks == to_le32(ex->ee_block)
+				+ ext4_ext_get_actual_len(ex)) {
+		/* split and initialize right part */
+		err = ext4_ext_split_extent_at(inode_ref, ppath, split,
+				EXT4_EXT_MARK_UNWRIT1, flags);
+	} else if (to_le32(ex->ee_block) == split) {
+		/* split and initialize left part */
+		err = ext4_ext_split_extent_at(inode_ref, ppath, split + blocks,
+				EXT4_EXT_MARK_UNWRIT2, flags);
+	} else {
+		/* split 1 extent to 3 and initialize the 2nd */
+		err = ext4_ext_split_extent_at(inode_ref, ppath, split + blocks,
+				EXT4_EXT_MARK_UNWRIT1 | EXT4_EXT_MARK_UNWRIT2, flags);
+		if (!err) {
+			err = ext4_ext_split_extent_at(inode_ref, ppath, split,
+					EXT4_EXT_MARK_UNWRIT1, flags);
+		}
+	}
+
+	return err;
+}
+
+int ext4_ext_tree_init(void *v, struct ext4_inode_ref *inode_ref)
+{
+	struct ext4_extent_header *eh;
+
+	eh = ext_inode_hdr(inode_ref->inode);
+	eh->eh_depth = 0;
+	eh->eh_entries = 0;
+	eh->eh_magic = to_le16(EXT4_EXT_MAGIC);
+	eh->eh_max = to_le16(ext4_ext_space_root(inode_ref, 0));
+	inode_ref->dirty = true;
+	return 0;
+}
+
+/*
+ * ext4_ext_next_allocated_block:
+ * returns allocated block in subsequent extent or EXT_MAX_BLOCKS.
+ * NOTE: it considers block number from index entry as
+ * allocated block. Thus, index entries have to be consistent
+ * with leaves.
+ */
+#define EXT_MAX_BLOCKS (ext4_lblk_t)-1
+
+ext4_lblk_t
+ext4_ext_next_allocated_block(struct ext4_ext_path *path)
+{
+	int depth;
+
+	depth = path->p_depth;
+
+	if (depth == 0 && path->p_ext == NULL)
+		return EXT_MAX_BLOCKS;
+
+	while (depth >= 0) {
+		if (depth == path->p_depth) {
+			/* leaf */
+			if (path[depth].p_ext &&
+				path[depth].p_ext !=
+					EXT_LAST_EXTENT(path[depth].p_hdr))
+			  return to_le32(path[depth].p_ext[1].ee_block);
+		} else {
+			/* index */
+			if (path[depth].p_idx !=
+					EXT_LAST_INDEX(path[depth].p_hdr))
+			  return to_le32(path[depth].p_idx[1].ei_block);
+		}
+		depth--;
+	}
+
+	return EXT_MAX_BLOCKS;
+}
+
+int ext4_ext_get_blocks(void *handle, struct ext4_inode_ref *inode_ref,
+			ext4_fsblk_t iblock,
+			unsigned long max_blocks,
+			ext4_fsblk_t *result,
+			int create, int extend_disksize)
+{
+	struct ext4_ext_path *path = NULL;
+	struct ext4_extent newex, *ex;
+	int goal, err = 0, depth;
+	unsigned long allocated = 0;
+	ext4_fsblk_t next, newblock;
+
+	if (result)
+		*result = 0;
+
+	/* find extent for this block */
+	err = ext4_find_extent(inode_ref, iblock, &path, 0);
+	if (err) {
+		path = NULL;
+		goto out2;
+	}
+
+	depth = ext_depth(inode_ref->inode);
+
+	/*
+	 * consistent leaf must not be empty
+	 * this situations is possible, though, _during_ tree modification
+	 * this is why assert can't be put in ext4_ext_find_extent()
+	 */
+	if ((ex = path[depth].p_ext)) {
+	        ext4_lblk_t ee_block = to_le32(ex->ee_block);
+		ext4_fsblk_t ee_start = ext4_ext_pblock(ex);
+		unsigned int ee_len  = ext4_ext_get_actual_len(ex);
+		/* if found exent covers block, simple return it */
+	        if (in_range(iblock, ee_block, ee_len)) {
+			newblock = iblock - ee_block + ee_start;
+			/* number of remain blocks in the extent */
+			allocated = ee_len - (iblock - ee_block);
+			goto out;
+		}
+	}
+
+	/*
+	 * requested block isn't allocated yet
+	 * we couldn't try to create block if create flag is zero
+	 */
+	if (!create) {
+		goto out2;
+	}
+
+	/* find next allocated block so that we know how many
+	 * blocks we can allocate without ovelapping next extent */
+	next = ext4_ext_next_allocated_block(path);
+	allocated = next - iblock;
+	if (allocated > max_blocks)
+		allocated = max_blocks;
+
+	/* allocate new block */
+	goal = ext4_ext_find_goal(inode_ref, path, iblock);
+	newblock = ext4_new_meta_blocks(inode_ref, goal, 0,
+					&allocated, &err);
+	if (!newblock)
+		goto out2;
+
+	/* try to insert new extent into found leaf and return */
+	newex.ee_block = to_le32(iblock);
+	ext4_ext_store_pblock(&newex, newblock);
+	newex.ee_len = to_le16(allocated);
+	err = ext4_ext_insert_extent(inode_ref, &path, &newex);
+	if (err) {
+		/* free data blocks we just allocated */
+		ext4_ext_free_blocks(inode_ref,
+				ext4_ext_pblock(&newex),
+				to_le16(newex.ee_len), 0);
+		goto out2;
+	}
+	print_path(path);
+
+	/* previous routine could use block we allocated */
+	newblock = ext4_ext_pblock(&newex);
+
+out:
+	if (allocated > max_blocks)
+		allocated = max_blocks;
+
+	if (result)
+		*result = newblock;
+
+out2:
+	if (path) {
+		ext4_ext_drop_refs(inode_ref, path, 0);
+		free(path);
+	}
+
+	return err ? err : allocated;
+}

@@ -582,53 +582,58 @@ struct ext4_directory_dx_block {
 	((ex)->block_count |= to_le16(EXT4_EXT_UNWRITTEN_MASK))
 #define EXT4_EXT_SET_WRITTEN(ex) \
 	((ex)->block_count &= ~(to_le16(EXT4_EXT_UNWRITTEN_MASK)))
+/*
+ * This is the extent tail on-disk structure.
+ * All other extent structures are 12 bytes long.  It turns out that
+ * block_size % 12 >= 4 for at least all powers of 2 greater than 512, which
+ * covers all valid ext4 block sizes.  Therefore, this tail structure can be
+ * crammed into the end of the block without having to rebalance the tree.
+ */
+struct ext4_extent_tail
+{
+	uint32_t et_checksum; /* crc32c(uuid+inum+extent_block) */
+};
 
 /*
  * This is the extent on-disk structure.
  * It's used at the bottom of the tree.
  */
-struct ext4_extent {
-	uint32_t first_block; /* First logical block extent covers */
-	uint16_t block_count; /* Number of blocks covered by extent */
-	uint16_t start_hi;    /* High 16 bits of physical block */
-	uint32_t start_lo;    /* Low 32 bits of physical block */
+struct ext4_extent
+{
+	uint32_t ee_block;    /* first logical block extent covers */
+	uint16_t ee_len;      /* number of blocks covered by extent */
+	uint16_t ee_start_hi; /* high 16 bits of physical block */
+	uint32_t ee_start_lo; /* low 32 bits of physical block */
 };
 
 /*
  * This is index on-disk structure.
  * It's used at all the levels except the bottom.
  */
-struct ext4_extent_index {
-	uint32_t first_block; /* Index covers logical blocks from 'block' */
-
-	/**
-	 * Pointer to the physical block of the next
-	 * level. leaf or next index could be there
-	 * high 16 bits of physical block
-	 */
-	uint32_t leaf_lo;
-	uint16_t leaf_hi;
-	uint16_t padding;
+struct ext4_extent_idx
+{
+	uint32_t ei_block;   /* index covers logical blocks from 'block' */
+	uint32_t ei_leaf_lo; /* pointer to the physical block of the next *
+					       * level. leaf or next index could
+			      * be there */
+	uint16_t ei_leaf_hi; /* high 16 bits of physical block */
+	uint16_t ei_unused;
 };
 
 /*
  * Each block (leaves and indexes), even inode-stored has header.
  */
-struct ext4_extent_header {
-	uint16_t magic;
-	uint16_t entries_count;     /* Number of valid entries */
-	uint16_t max_entries_count; /* Capacity of store in entries */
-	uint16_t depth;		    /* Has tree real underlying blocks? */
-	uint32_t generation;	/* generation of the tree */
+struct ext4_extent_header
+{
+	uint16_t eh_magic;      /* probably will support different formats */
+	uint16_t eh_entries;    /* number of valid entries */
+	uint16_t eh_max;	/* capacity of store in entries */
+	uint16_t eh_depth;      /* has tree real underlying blocks? */
+	uint32_t eh_generation; /* generation of the tree */
 };
 
-struct ext4_extent_path {
-	struct ext4_block block;
-	uint16_t depth;
-	struct ext4_extent_header *header;
-	struct ext4_extent_index *index;
-	struct ext4_extent *extent;
-};
+#define EXT4_EXT_MAGIC (0xf30a)
+
 
 #define EXT4_EXTENT_MAGIC 0xF30A
 
