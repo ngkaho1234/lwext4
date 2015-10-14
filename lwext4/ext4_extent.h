@@ -243,10 +243,10 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 
 int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 			ext4_fsblk_t iblock,
-			int max_blocks,
+			unsigned long max_blocks,
 			ext4_fsblk_t *result,
 			int create,
-			int *blocks_count);
+			unsigned long *blocks_count);
 
 int ext4_ext_tree_init(struct ext4_inode_ref *inode_ref);
 

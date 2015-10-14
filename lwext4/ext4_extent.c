@@ -34,7 +34,7 @@ static inline int ext4_allocate_single_block(struct ext4_inode_ref *inode_ref,
 static ext4_fsblk_t ext4_new_meta_blocks(struct ext4_inode_ref *inode_ref,
 			ext4_fsblk_t goal,
 			unsigned int flags __unused,
-			int *count, int *errp)
+			unsigned long *count, int *errp)
 {
 	ext4_fsblk_t block = 0;
 
@@ -1527,13 +1527,13 @@ ext4_ext_next_allocated_block(struct ext4_ext_path *path)
 static int
 ext4_ext_zero_unwritten_range(struct ext4_inode_ref *inode_ref,
 			      ext4_fsblk_t block,
-			      int blocks_count)
+			      unsigned long blocks_count)
 {
 	int err = EOK;
-	int i;
+	unsigned long i;
 	uint32_t block_size = ext4_sb_get_block_size(&inode_ref->fs->sb);
 	for (i = 0;i < blocks_count;i++) {
-		uint32_t block_u32 = (uint32_t)block + i;
+		uint32_t block_u32 = (uint32_t)block + (uint32_t)i;
 		struct ext4_block bh = {0};
 		err = ext4_block_get(inode_ref->fs->bdev, &bh,
 				     block_u32);
@@ -1552,15 +1552,15 @@ ext4_ext_zero_unwritten_range(struct ext4_inode_ref *inode_ref,
 
 int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 			ext4_fsblk_t iblock,
-			int max_blocks,
+			unsigned long max_blocks,
 			ext4_fsblk_t *result,
 			int create,
-			int *blocks_count)
+			unsigned long *blocks_count)
 {
 	struct ext4_ext_path *path = NULL;
 	struct ext4_extent newex, *ex;
 	int goal, err = EOK, depth;
-	int allocated = 0;
+	unsigned long allocated = 0;
 	ext4_fsblk_t next, newblock;
 
 	if (result)
@@ -1594,7 +1594,7 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 
 			if (ext4_ext_is_unwritten(ex)) {
 				if (create) {
-					int zero_range;
+					unsigned long zero_range;
 					zero_range = allocated;
 					if (zero_range > max_blocks)
 						zero_range = max_blocks;
