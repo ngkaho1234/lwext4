@@ -1584,15 +1584,18 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 	        if (in_range(iblock, ee_block, ee_len)) {
 			/* number of remain blocks in the extent */
 			allocated = ee_len - (iblock - ee_block);
-			if (allocated > max_blocks)
-				allocated = max_blocks;
 
 			if (ext4_ext_is_unwritten(ex)) {
 				if (create) {
+					unsigned long zero_range;
+					zero_range = allocated;
+					if (zero_range > max_blocks)
+						zero_range = max_blocks;
+
 					newblock = iblock - ee_block + ee_start;
 					err = ext4_ext_zero_unwritten_range(inode_ref,
 							newblock,
-							1);
+							zero_range);
 					if (err != EOK)
 						goto out2;
 
@@ -1600,7 +1603,7 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 							inode_ref,
 							&path,
 							iblock,
-							allocated);
+							zero_range);
 					if (err != EOK)
 						goto out2;
 
