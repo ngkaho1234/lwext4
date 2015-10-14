@@ -242,12 +242,12 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 
 
 int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref, ext4_fsblk_t iblock,
-			uint32_t max_blocks, ext4_fsblk_t *result, int create,
+			uint32_t max_blocks, ext4_fsblk_t *result, bool create,
 			uint32_t *blocks_count);
 
 int ext4_ext_tree_init(struct ext4_inode_ref *inode_ref);
 
-int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref, ext4_lblk_t start,
-			  ext4_lblk_t end);
+int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref,  ext4_lblk_t from,
+			  ext4_lblk_t to);
 
 #endif /* EXT4_EXTENT_H_ */
