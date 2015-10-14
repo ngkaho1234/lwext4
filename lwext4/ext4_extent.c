@@ -16,6 +16,7 @@
 
 #define EXT4_EXT_DATA_VALID1	0x8  /* first half contains valid data */
 #define EXT4_EXT_DATA_VALID2	0x10 /* second half contains valid data */
+#define EXT4_EXT_NO_COMBINE	0x20 /* do not combine two extents */
 
 #define _EXTENTS_TEST
 #ifdef _EXTENTS_TEST
@@ -801,7 +802,8 @@ static int ext4_ext_insert_leaf(struct ext4_inode_ref *inode_ref,
 			       struct ext4_ext_path *path,
 			       int at,
 			       struct ext4_extent *newext,
-			       struct ext_split_trans *spt)
+			       struct ext_split_trans *spt,
+			       int flags)
 {
 	struct ext4_ext_path *curp = path + at;
 	struct ext4_extent *ex = curp->p_ext;
@@ -813,27 +815,29 @@ static int ext4_ext_insert_leaf(struct ext4_inode_ref *inode_ref,
 		to_le32(newext->ee_block) == to_le32(curp->p_ext->ee_block))
 		return EIO;
 
-	if (curp->p_ext && ext4_ext_can_append(curp->p_ext, newext)) {
-		unwritten = ext4_ext_is_unwritten(curp->p_ext);
-		curp->p_ext->ee_len = to_le16(ext4_ext_get_actual_len(curp->p_ext)
-			+ ext4_ext_get_actual_len(newext));
-		if (unwritten)
-			ext4_ext_mark_unwritten(curp->p_ext);
-		err = __ext4_ext_dirty(inode_ref, curp);
-		goto out;
+	if (!(flags & EXT4_EXT_NO_COMBINE)) {
+		if (curp->p_ext && ext4_ext_can_append(curp->p_ext, newext)) {
+			unwritten = ext4_ext_is_unwritten(curp->p_ext);
+			curp->p_ext->ee_len = to_le16(ext4_ext_get_actual_len(curp->p_ext)
+				+ ext4_ext_get_actual_len(newext));
+			if (unwritten)
+				ext4_ext_mark_unwritten(curp->p_ext);
+			err = __ext4_ext_dirty(inode_ref, curp);
+			goto out;
 
-	}
+		}
 
-	if (curp->p_ext && ext4_ext_can_prepend(curp->p_ext, newext)) {
-		unwritten = ext4_ext_is_unwritten(curp->p_ext);
-		curp->p_ext->ee_block = newext->ee_block;
-		curp->p_ext->ee_len = to_le16(ext4_ext_get_actual_len(curp->p_ext)
-			+ ext4_ext_get_actual_len(newext));
-		if (unwritten)
-			ext4_ext_mark_unwritten(curp->p_ext);
-		err = __ext4_ext_dirty(inode_ref, curp);
-		goto out;
+		if (curp->p_ext && ext4_ext_can_prepend(curp->p_ext, newext)) {
+			unwritten = ext4_ext_is_unwritten(curp->p_ext);
+			curp->p_ext->ee_block = newext->ee_block;
+			curp->p_ext->ee_len = to_le16(ext4_ext_get_actual_len(curp->p_ext)
+				+ ext4_ext_get_actual_len(newext));
+			if (unwritten)
+				ext4_ext_mark_unwritten(curp->p_ext);
+			err = __ext4_ext_dirty(inode_ref, curp);
+			goto out;
 
+		}
 	}
 
 	if (to_le16(curp->p_hdr->eh_entries)
@@ -1047,7 +1051,8 @@ ext4_ext_replace_path(struct ext4_inode_ref *inode_ref,
 
 int ext4_ext_insert_extent(struct ext4_inode_ref *inode_ref,
 		struct ext4_ext_path **ppath,
-		struct ext4_extent *newext)
+		struct ext4_extent *newext,
+		int flags)
 {
 	int i, depth, level, ret = EOK;
 	ext4_fsblk_t ptr = 0;
@@ -1074,7 +1079,8 @@ again:
 		if (!i) {
 			ret = ext4_ext_insert_leaf(inode_ref,
 					     path, depth - i,
-					     newext, &newblock);
+					     newext, &newblock,
+					     flags);
 		} else {
 			ret = ext4_ext_insert_index(inode_ref,
 					     path, depth - i,
@@ -1421,7 +1427,8 @@ int ext4_ext_split_extent_at(struct ext4_inode_ref *inode_ref,
 	ext4_ext_store_pblock(&newex, newblock);
 	if (split_flag & EXT4_EXT_MARK_UNWRIT2)
 		ext4_ext_mark_unwritten(&newex);
-	err = ext4_ext_insert_extent(inode_ref, ppath, &newex);
+	err = ext4_ext_insert_extent(inode_ref, ppath, &newex,
+				EXT4_EXT_NO_COMBINE);
 	if (err != EOK)
 		goto restore_extent_len;
 
@@ -1643,7 +1650,7 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 	newex.ee_block = to_le32(iblock);
 	ext4_ext_store_pblock(&newex, newblock);
 	newex.ee_len = to_le16(allocated);
-	err = ext4_ext_insert_extent(inode_ref, &path, &newex);
+	err = ext4_ext_insert_extent(inode_ref, &path, &newex, 0);
 	if (err != EOK) {
 		/* free data blocks we just allocated */
 		ext4_ext_free_blocks(inode_ref,
