@@ -4,9 +4,10 @@
 #include "ext4_extent.h"
 #include "ext4_debug.h"
 
-#include <memory.h>
+#include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
+#include <inttypes.h>
+#include <stddef.h>
 
 /*
  * used by extent splitting.
@@ -284,7 +285,7 @@ static int ext4_ext_check(struct ext4_inode_ref *inode_ref,
 corrupted:
 	ext4_dbg(DEBUG_EXTENT, "Bad extents B+ tree block: %s. "
 				"Blocknr: %llu\n", error_msg,
-				pblk);
+				(long long unsigned int)pblk);
 	return EIO;
 }
 
@@ -293,7 +294,7 @@ read_extent_tree_block(struct ext4_inode_ref *inode_ref,
 			ext4_fsblk_t pblk, int depth,
 			struct ext4_block *bh, int flags __unused)
 {
-	int				err;
+	int err;
 
 	err = ext4_block_get(inode_ref->fs->bdev, bh, pblk);
 	if (err != EOK)
@@ -1023,14 +1024,19 @@ static int ext4_ext_grow_indepth(struct ext4_inode_ref *inode_ref,
 	return err;
 }
 
-void print_path(struct ext4_ext_path *path)
+__unused static void print_path(struct ext4_ext_path *path)
 {
 	int i = path->p_depth;
 	while (i >= 0) {
-		ext4_dbg(DEBUG_EXTENT, "depth %d, p_block: %llu, p_ext offset: %d, p_idx offset: %d\n", i,
-			path->p_block,
-			(path->p_ext)?(path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)):0,
-			(path->p_idx)?(path->p_idx - EXT_FIRST_INDEX(path->p_hdr)):0);
+
+		ptrdiff_t a = (path->p_ext) ?
+			      (path->p_ext - EXT_FIRST_EXTENT(path->p_hdr)) : 0;
+		ptrdiff_t b = (path->p_idx) ?
+			      (path->p_idx - EXT_FIRST_INDEX(path->p_hdr)) : 0;
+
+		ext4_dbg(DEBUG_EXTENT,
+			"depth %d, p_block: %"PRIu64", p_ext offset: %td, p_idx offset: %td\n",
+			i, path->p_block, a, b);
 		i--;
 		path++;
 	}
@@ -1155,7 +1161,7 @@ static void ext4_ext_remove_blocks(struct ext4_inode_ref *inode_ref,
 	ext4_fsblk_t start;
 	num = from - to_le32(ex->ee_block);
 	start = ext4_ext_pblock(ex) + num;
-	ext4_dbg(DEBUG_EXTENT, "Freeing %u at %llu, %d\n", from, start, len);
+	ext4_dbg(DEBUG_EXTENT, "Freeing %u at %"PRIu64", %d\n", from, start, len);
 	ext4_ext_free_blocks(inode_ref, start, len, 0);
 }
 
@@ -1180,7 +1186,7 @@ static int ext4_ext_remove_idx(struct ext4_inode_ref *inode_ref,
 	if (err != EOK)
 		return err;
 
-	ext4_dbg(DEBUG_EXTENT, "IDX: Freeing %u at %llu, %d\n",
+	ext4_dbg(DEBUG_EXTENT, "IDX: Freeing %u at %"PRIu64", %d\n",
 		to_le32(path[i].p_idx->ei_block), leaf, 1);
 	ext4_ext_free_blocks(inode_ref, leaf, 1, 0);
 
