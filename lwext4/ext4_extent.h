@@ -26,8 +26,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _NEW_BTREE_H
-#define _NEW_BTREE_H
+#ifndef EXT4_EXTENT_H_
+#define EXT4_EXTENT_H_
 
 #include "ext4_config.h"
 #include "ext4_types.h"
@@ -254,4 +254,4 @@ int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref,
 			  ext4_lblk_t start,
 			  ext4_lblk_t end);
 
-#endif /* _NEW_BTREE_H */
+#endif /* EXT4_EXTENT_H_ */
