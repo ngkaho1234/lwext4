@@ -278,13 +278,13 @@ static int ext4_ext_check(struct ext4_inode_ref *inode_ref,
 		/* FIXME: Warning: extent checksum damaged? */
 	}
 
-	return 0;
+	return EOK;
 
 corrupted:
 	ext4_dbg(DEBUG_EXTENT, "Bad extents B+ tree block: %s. "
 				"Blocknr: %llu\n", error_msg,
 				pblk);
-	return -EIO;
+	return EIO;
 }
 
 static int
@@ -300,7 +300,7 @@ read_extent_tree_block(struct ext4_inode_ref *inode_ref,
 
 	err = ext4_ext_check(inode_ref,
 			       ext_block_hdr(bh), depth, pblk);
-	if (err)
+	if (err != EOK)
 		goto errout;
 
 	return EOK;
@@ -399,7 +399,7 @@ int ext4_find_extent(struct ext4_inode_ref *inode_ref,
 		path = calloc(1, sizeof(struct ext4_ext_path) *
 					(path_depth + 1));
 		if (!path)
-			return -ENOMEM;
+			return ENOMEM;
 		path[0].p_maxdepth = path_depth;
 	}
 	path[0].p_hdr = eh;
@@ -589,7 +589,7 @@ static int ext4_ext_insert_index(struct ext4_inode_ref *inode_ref,
 			err = ext4_ext_split_node(inode_ref,
 						  path, at,
 						  newext, &spt->ptr, &bh);
-			if (err)
+			if (err != EOK)
 				goto out;
 
 			neh = ext_block_hdr(&bh);
@@ -653,7 +653,7 @@ static int ext4_ext_insert_index(struct ext4_inode_ref *inode_ref,
 		err = EOK;
 
 out:
-	if (err) {
+	if (err != EOK) {
 		if (bh.lb_id)
 			ext4_block_set(inode_ref->fs->bdev, &bh);
 
@@ -729,7 +729,7 @@ static int ext4_ext_correct_indexes(struct ext4_inode_ref *inode_ref,
 	border = path[depth].p_ext->ee_block;
 	path[k].p_idx->ei_block = border;
 	err = __ext4_ext_dirty(inode_ref, path + k);
-	if (err)
+	if (err != EOK)
 		return err;
 
 	while (k--) {
@@ -738,7 +738,7 @@ static int ext4_ext_correct_indexes(struct ext4_inode_ref *inode_ref,
 			break;
 		path[k].p_idx->ei_block = border;
 		err = __ext4_ext_dirty(inode_ref, path + k);
-		if (err)
+		if (err != EOK)
 			break;
 	}
 
@@ -842,7 +842,7 @@ static int ext4_ext_insert_leaf(struct ext4_inode_ref *inode_ref,
 			struct ext4_extent_header *neh;
 			err = ext4_ext_split_node(inode_ref, path, at,
 						  newext, &spt->ptr, &bh);
-			if (err)
+			if (err != EOK)
 				goto out;
 
 			neh = ext_block_hdr(&bh);
@@ -903,14 +903,14 @@ static int ext4_ext_insert_leaf(struct ext4_inode_ref *inode_ref,
 
 	if (eh == curp->p_hdr) {
 		err = ext4_ext_correct_indexes(inode_ref, path);
-		if (err)
+		if (err != EOK)
 			goto out;
 		err = __ext4_ext_dirty(inode_ref, curp);
 	} else
 		err = EOK;
 
 out:
-	if (err) {
+	if (err != EOK) {
 		if (bh.lb_id)
 			ext4_block_set(inode_ref->fs->bdev,
 					&bh);
@@ -1171,7 +1171,7 @@ static int ext4_ext_remove_idx(struct ext4_inode_ref *inode_ref,
 	path[i].p_hdr->eh_entries
 		= to_le16(to_le16(path[i].p_hdr->eh_entries) - 1);
 	err = __ext4_ext_dirty(inode_ref, path + i);
-	if (err)
+	if (err != EOK)
 		return err;
 
 	ext4_dbg(DEBUG_EXTENT, "IDX: Freeing %u at %llu, %d\n",
@@ -1184,7 +1184,7 @@ static int ext4_ext_remove_idx(struct ext4_inode_ref *inode_ref,
 
 		path[i-1].p_idx->ei_block = path[i].p_idx->ei_block;
 		err = __ext4_ext_dirty(inode_ref, path + i - 1);
-		if (err)
+		if (err != EOK)
 			break;
 
 		i--;
@@ -1413,7 +1413,7 @@ int ext4_ext_split_extent_at(struct ext4_inode_ref *inode_ref,
 		ext4_ext_mark_unwritten(ex);
 
 	err = __ext4_ext_dirty(inode_ref, *ppath + depth);
-	if (err)
+	if (err != EOK)
 		goto out;
 
 	newex.ee_block = to_le32(split);
@@ -1422,7 +1422,7 @@ int ext4_ext_split_extent_at(struct ext4_inode_ref *inode_ref,
 	if (split_flag & EXT4_EXT_MARK_UNWRIT2)
 		ext4_ext_mark_unwritten(&newex);
 	err = ext4_ext_insert_extent(inode_ref, ppath, &newex);
-	if (err)
+	if (err != EOK)
 		goto restore_extent_len;
 
 out:
@@ -1476,7 +1476,7 @@ int ext4_ext_tree_init(struct ext4_inode_ref *inode_ref)
 	eh->eh_magic = to_le16(EXT4_EXT_MAGIC);
 	eh->eh_max = to_le16(ext4_ext_space_root(inode_ref));
 	inode_ref->dirty = true;
-	return 0;
+	return EOK;
 }
 
 /*
@@ -1517,6 +1517,32 @@ ext4_ext_next_allocated_block(struct ext4_ext_path *path)
 	return EXT_MAX_BLOCKS;
 }
 
+static int
+ext4_ext_zero_unwritten_range(struct ext4_inode_ref *inode_ref,
+			      ext4_fsblk_t block,
+			      unsigned long blocks_count)
+{
+	int err = EOK;
+	unsigned long i;
+	uint32_t block_size = ext4_sb_get_block_size(&inode_ref->fs->sb);
+	for (i = 0;i < blocks_count;i++) {
+		uint32_t block_u32 = (uint32_t)block + (uint32_t)i;
+		struct ext4_block bh = {0};
+		err = ext4_block_get(inode_ref->fs->bdev, &bh,
+				     block_u32);
+		if (err != EOK)
+			break;
+
+		memset(bh.data, 0, block_size);
+		bh.dirty = true;
+		err = ext4_block_set(inode_ref->fs->bdev, &bh);
+		if (err != EOK)
+			break;
+
+	}
+	return err;
+}
+
 int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 			ext4_fsblk_t iblock,
 			unsigned long max_blocks,
@@ -1538,7 +1564,7 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 
 	/* find extent for this block */
 	err = ext4_find_extent(inode_ref, iblock, &path, 0);
-	if (err) {
+	if (err != EOK) {
 		path = NULL;
 		goto out2;
 	}
@@ -1558,15 +1584,24 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 	        if (in_range(iblock, ee_block, ee_len)) {
 			/* number of remain blocks in the extent */
 			allocated = ee_len - (iblock - ee_block);
+			if (allocated > max_blocks)
+				allocated = max_blocks;
+
 			if (ext4_ext_is_unwritten(ex)) {
 				if (create) {
 					newblock = iblock - ee_block + ee_start;
+					err = ext4_ext_zero_unwritten_range(inode_ref,
+							newblock,
+							1);
+					if (err != EOK)
+						goto out2;
+
 					err = ext4_ext_convert_to_initialized (
 							inode_ref,
 							&path,
 							iblock,
 							allocated);
-					if (err)
+					if (err != EOK)
 						goto out2;
 
 				} else {
@@ -1606,7 +1641,7 @@ int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 	ext4_ext_store_pblock(&newex, newblock);
 	newex.ee_len = to_le16(allocated);
 	err = ext4_ext_insert_extent(inode_ref, &path, &newex);
-	if (err) {
+	if (err != EOK) {
 		/* free data blocks we just allocated */
 		ext4_ext_free_blocks(inode_ref,
 				ext4_ext_pblock(&newex),

@@ -1471,7 +1471,7 @@ int ext4_fwrite(ext4_file *f, const void *buf, size_t size, size_t *wcnt)
 	if (u) {
 		uint32_t ll = size > (block_size - u) ? (block_size - u) : size;
 
-		r = ext4_fs_get_inode_data_block_index(&ref, sblock, &fblock);
+		r = ext4_fs_init_inode_data_block_index(&ref, sblock, &fblock);
 		if (r != EOK)
 			goto Finish;
 
@@ -1507,7 +1507,7 @@ int ext4_fwrite(ext4_file *f, const void *buf, size_t size, size_t *wcnt)
 
 		while (sblock < sblock_end) {
 			if (sblock < file_blocks) {
-				r = ext4_fs_get_inode_data_block_index(
+				r = ext4_fs_init_inode_data_block_index(
 				    &ref, sblock, &fblock);
 				if (r != EOK)
 					break;
@@ -1554,7 +1554,7 @@ int ext4_fwrite(ext4_file *f, const void *buf, size_t size, size_t *wcnt)
 
 	if (size) {
 		if (sblock < file_blocks) {
-			r = ext4_fs_get_inode_data_block_index(&ref, sblock,
+			r = ext4_fs_init_inode_data_block_index(&ref, sblock,
 							       &fblock);
 			if (r != EOK)
 				goto Finish;

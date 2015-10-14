@@ -1023,7 +1023,7 @@ int ext4_fs_get_inode_data_block_index(struct ext4_inode_ref *inode_ref,
 		ext4_fsblk_t current_fsblk;
 		int rc = ext4_ext_get_blocks(inode_ref,
 					iblock,
-					EXT_INIT_MAX_LEN,
+					1,
 					&current_fsblk,
 					false,
 					NULL);
@@ -1116,6 +1116,36 @@ int ext4_fs_get_inode_data_block_index(struct ext4_inode_ref *inode_ref,
 	*fblock = current_block;
 
 	return EOK;
+}
+
+int ext4_fs_init_inode_data_block_index(struct ext4_inode_ref *inode_ref,
+				       uint64_t iblock, uint32_t *fblock)
+{
+	struct ext4_fs *fs = inode_ref->fs;
+
+	uint32_t current_block;
+#if CONFIG_EXTENT_ENABLE
+	/* Handle i-node using extents */
+	if ((ext4_sb_has_feature_incompatible(&fs->sb,
+					      EXT4_FEATURE_INCOMPAT_EXTENTS)) &&
+	    (ext4_inode_has_flag(inode_ref->inode, EXT4_INODE_FLAG_EXTENTS))) {
+
+		ext4_fsblk_t current_fsblk;
+		int rc = ext4_ext_get_blocks(inode_ref,
+					iblock,
+					1,
+					&current_fsblk,
+					true,
+					NULL);
+		if (rc != EOK)
+			return rc;
+
+		current_block = (uint32_t)current_fsblk;
+		*fblock = current_block;
+		return EOK;
+	}
+#endif
+	return ENOTSUP;
 }
 
 int ext4_fs_set_inode_data_block_index(struct ext4_inode_ref *inode_ref,
