@@ -1326,15 +1326,21 @@ int ext4_fread(ext4_file *f, void *buf, size_t size, size_t *rcnt)
 		if (r != EOK)
 			goto Finish;
 
-		r = ext4_block_get(f->mp->fs.bdev, &b, fblock);
-		if (r != EOK)
-			goto Finish;
+		/* Do we get an unwritten range? */
+		if (fblock != 0) {
+			r = ext4_block_get(f->mp->fs.bdev, &b, fblock);
+			if (r != EOK)
+				goto Finish;
 
-		memcpy(u8_buf, b.data + u, ll);
+			memcpy(u8_buf, b.data + u, ll);
 
-		r = ext4_block_set(f->mp->fs.bdev, &b);
-		if (r != EOK)
-			goto Finish;
+			r = ext4_block_set(f->mp->fs.bdev, &b);
+			if (r != EOK)
+				goto Finish;
+		} else {
+			/* Yes, we do. */
+			memset(u8_buf, 0, ll);
+		}
 
 		u8_buf += ll;
 		size -= ll;
