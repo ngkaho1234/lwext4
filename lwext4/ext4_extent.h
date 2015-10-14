@@ -95,8 +95,8 @@ find_ext4_extent_tail(struct ext4_extent_header *eh)
 struct ext4_ext_path
 {
 	ext4_fsblk_t p_block;
-	int p_depth;
-	int p_maxdepth;
+	int32_t p_depth;
+	int32_t p_maxdepth;
 	struct ext4_extent *p_ext;
 	struct ext4_extent_idx *p_idx;
 	struct ext4_extent_header *p_hdr;
@@ -124,7 +124,7 @@ struct ext4_ext_path
  * Hence, the maximum number of blocks we can have in an *initialized*
  * extent is 2^15 (32768) and in an *uninitialized* extent is 2^15-1 (32767).
  */
-#define EXT_INIT_MAX_LEN (1 << 15)
+#define EXT_INIT_MAX_LEN (1L << 15)
 #define EXT_UNWRITTEN_MAX_LEN	(EXT_INIT_MAX_LEN - 1)
 
 #define EXT_EXTENT_SIZE sizeof(struct ext4_extent)
@@ -157,12 +157,12 @@ static inline struct ext4_extent_header *ext_block_hdr(struct ext4_block *block)
 	return (struct ext4_extent_header *)block->data;
 }
 
-static inline unsigned int ext_depth(struct ext4_inode *inode)
+static inline uint16_t ext_depth(struct ext4_inode *inode)
 {
-	return ext_inode_hdr(inode)->eh_depth;
+	return to_le16(ext_inode_hdr(inode)->eh_depth);
 }
 
-static inline int ext4_ext_get_actual_len(struct ext4_extent *ext)
+static inline uint16_t ext4_ext_get_actual_len(struct ext4_extent *ext)
 {
 	return (to_le16(ext->ee_len) <= EXT_INIT_MAX_LEN ?
 		to_le16(ext->ee_len) :
@@ -241,17 +241,13 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 #define in_range(b, first, len)	((b) >= (first) && (b) <= (first) + (len) - 1)
 
 
-int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
-			ext4_fsblk_t iblock,
-			uint32_t max_blocks,
-			ext4_fsblk_t *result,
-			int create,
+int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref, ext4_fsblk_t iblock,
+			uint32_t max_blocks, ext4_fsblk_t *result, int create,
 			uint32_t *blocks_count);
 
 int ext4_ext_tree_init(struct ext4_inode_ref *inode_ref);
 
-int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref,
-			  ext4_lblk_t start,
+int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref, ext4_lblk_t start,
 			  ext4_lblk_t end);
 
 #endif /* EXT4_EXTENT_H_ */
