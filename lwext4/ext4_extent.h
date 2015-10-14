@@ -72,7 +72,7 @@ typedef uint64_t ext4_fsblk_t;
 static inline struct ext4_extent_tail *
 find_ext4_extent_tail(struct ext4_extent_header *eh)
 {
-	return (struct ext4_extent_tail *)(((void *)eh) +
+	return (struct ext4_extent_tail *)(((char *)eh) +
 					   EXT4_EXTENT_TAIL_OFFSET(eh));
 }
 
@@ -230,13 +230,14 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 #define in_range(b, first, len)	((b) >= (first) && (b) <= (first) + (len) - 1)
 
 
-int ext4_ext_get_blocks(void *handle, struct ext4_inode_ref *inode_ref,
+int ext4_ext_get_blocks(struct ext4_inode_ref *inode_ref,
 			ext4_fsblk_t iblock,
 			unsigned long max_blocks,
 			ext4_fsblk_t *result,
-			int create, int extend_disksize);
+			int create,
+			unsigned long *blocks_count);
 
-int ext4_ext_tree_init(void *v, struct ext4_inode_ref *inode_ref);
+int ext4_ext_tree_init(struct ext4_inode_ref *inode_ref);
 
 int ext4_ext_remove_space(struct ext4_inode_ref *inode_ref,
 			  ext4_lblk_t start,

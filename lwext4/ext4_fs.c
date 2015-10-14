@@ -696,17 +696,7 @@ void ext4_fs_inode_blocks_init(struct ext4_fs *fs, struct ext4_inode_ref *inode_
 		ext4_inode_set_flag(inode, EXT4_INODE_FLAG_EXTENTS);
 
 		/* Initialize extent root header */
-		struct ext4_extent_header *header = ext4_inode_get_extent_header(inode);
-		ext4_extent_header_set_depth(header, 0);
-		ext4_extent_header_set_entries_count(header, 0);
-		ext4_extent_header_set_generation(header, 0);
-		ext4_extent_header_set_magic(header, EXT4_EXTENT_MAGIC);
-
-		uint16_t max_entries = (EXT4_INODE_BLOCKS * sizeof(uint32_t) -
-				sizeof(struct ext4_extent_header)) /
-			sizeof(struct ext4_extent);
-
-		ext4_extent_header_set_max_entries_count(header, max_entries);
+		ext4_ext_tree_init(inode_ref);
 	}
 #endif
 }
@@ -982,9 +972,10 @@ int ext4_fs_truncate_inode(struct ext4_inode_ref *inode_ref, uint64_t new_size)
 
 		/* Extents require special operation */
 		if (diff_blocks_count) {
-			int rc = ext4_extent_release_blocks_from(
+			int rc = ext4_ext_remove_space(
 					inode_ref,
-					new_blocks_count);
+					new_blocks_count,
+					-1UL);
 			if (rc != EOK)
 				return rc;
 
@@ -1029,11 +1020,17 @@ int ext4_fs_get_inode_data_block_index(struct ext4_inode_ref *inode_ref,
 					      EXT4_FEATURE_INCOMPAT_EXTENTS)) &&
 	    (ext4_inode_has_flag(inode_ref->inode, EXT4_INODE_FLAG_EXTENTS))) {
 
-		int rc =
-		    ext4_extent_find_block(inode_ref, iblock, &current_block);
+		ext4_fsblk_t current_fsblk;
+		int rc = ext4_ext_get_blocks(inode_ref,
+					iblock,
+					EXT_INIT_MAX_LEN,
+					&current_fsblk,
+					false,
+					NULL);
 		if (rc != EOK)
 			return rc;
 
+		current_block = (uint32_t)current_fsblk;
 		*fblock = current_block;
 		return EOK;
 	}
@@ -1389,8 +1386,18 @@ int ext4_fs_append_inode_block(struct ext4_inode_ref *inode_ref,
 	if ((ext4_sb_has_feature_incompatible(&inode_ref->fs->sb,
 					      EXT4_FEATURE_INCOMPAT_EXTENTS)) &&
 	    (ext4_inode_has_flag(inode_ref->inode, EXT4_INODE_FLAG_EXTENTS))) {
-		return ext4_extent_append_block(inode_ref, iblock, fblock,
-						true);
+		int rc;
+		ext4_fsblk_t current_fsblk;
+		*iblock = ext4_inode_get_blocks_count(&inode_ref->fs->sb,
+					inode_ref->inode);
+		rc = ext4_ext_get_blocks(inode_ref,
+				*iblock,
+				1,
+				&current_fsblk,
+				true,
+				NULL);
+		*fblock = current_fsblk;
+		return rc;
 	}
 #endif
 	struct ext4_sblock *sb = &inode_ref->fs->sb;
