@@ -192,6 +192,10 @@ int ext4_block_cache_shake(struct ext4_blockdev *bdev)
 
 	bdev->bc->dont_shake = true;
 
+	/* Try to release memory pressure. */
+	if (bdev->journal)
+		jbd_journal_flush(bdev->journal);
+
 	while (!RB_EMPTY(&bdev->bc->lru_root) &&
 		ext4_bcache_is_full(bdev->bc)) {
 
@@ -461,6 +465,10 @@ int ext4_block_cache_write_back(struct ext4_blockdev *bdev, uint8_t on_off)
 
 	if (bdev->cache_write_back)
 		return EOK;
+
+	/*Flush the pending transaction to disk. */
+	if (bdev->journal)
+		jbd_journal_flush(bdev->journal);
 
 	/*Flush data in all delayed cache blocks*/
 	return ext4_block_cache_flush(bdev);

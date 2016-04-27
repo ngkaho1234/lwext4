@@ -70,7 +70,9 @@ struct jbd_revoke_rec {
 
 struct jbd_block_rec {
 	ext4_fsblk_t lba;
+	void *frozen_data;
 	struct jbd_trans *trans;
+	struct jbd_trans *frozen_trans;
 	RB_ENTRY(jbd_block_rec) block_rec_node;
 	LIST_ENTRY(jbd_block_rec) tbrec_node;
 	TAILQ_HEAD(jbd_buf_dirty, jbd_buf) dirty_buf_queue;
@@ -78,6 +80,7 @@ struct jbd_block_rec {
 
 struct jbd_trans {
 	uint32_t trans_id;
+	bool committed;
 
 	uint32_t start_iblock;
 	int alloc_blocks;
@@ -103,10 +106,16 @@ struct jbd_journal {
 
 	uint32_t block_size;
 
+	TAILQ_HEAD(jbd_trans_queue, jbd_trans) trans_queue;
 	TAILQ_HEAD(jbd_cp_queue, jbd_trans) cp_queue;
 	RB_HEAD(jbd_block, jbd_block_rec) block_rec_root;
 
 	struct jbd_fs *jbd_fs;
+
+	void *buffer_window;
+	int32_t max_window_size;
+	int32_t curr_window_size;
+	int32_t orig_window_size;
 };
 
 int jbd_get_fs(struct ext4_fs *fs,
@@ -118,6 +127,7 @@ int jbd_inode_bmap(struct jbd_fs *jbd_fs,
 int jbd_recover(struct jbd_fs *jbd_fs);
 int jbd_journal_start(struct jbd_fs *jbd_fs,
 		      struct jbd_journal *journal);
+int jbd_journal_flush(struct jbd_journal *journal);
 int jbd_journal_stop(struct jbd_journal *journal);
 struct jbd_trans *
 jbd_journal_new_trans(struct jbd_journal *journal);
@@ -136,6 +146,10 @@ void
 jbd_journal_purge_cp_trans(struct jbd_journal *journal,
 			   bool flush,
 			   bool once);
+int jbd_trans_freeze_data(struct jbd_journal *journal,
+			  struct jbd_trans *trans,
+			  struct ext4_block *block);
+void *jbd_journal_prev_data(struct ext4_buf *buf);
 
 #ifdef __cplusplus
 }

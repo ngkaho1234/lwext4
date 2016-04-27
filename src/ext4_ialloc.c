@@ -226,7 +226,8 @@ int ext4_ialloc_free_inode(struct ext4_fs *fs, uint32_t index, bool is_dir)
 	return EOK;
 }
 
-int ext4_ialloc_alloc_inode(struct ext4_fs *fs, uint32_t *idx, bool is_dir)
+static inline int
+__ext4_ialloc_alloc_inode(struct ext4_fs *fs, uint32_t *idx, bool is_dir)
 {
 	struct ext4_sblock *sb = &fs->sb;
 
@@ -270,6 +271,12 @@ int ext4_ialloc_alloc_inode(struct ext4_fs *fs, uint32_t *idx, bool is_dir)
 				ext4_fs_put_block_group_ref(&bg_ref);
 				return rc;
 			}
+			rc = ext4_trans_freeze_data(fs->bdev, &b);
+			if (rc != EOK) {
+				ext4_block_set(fs->bdev, &b);
+				ext4_fs_put_block_group_ref(&bg_ref);
+				return rc;
+			}
 
 			if (!ext4_ialloc_verify_bitmap_csum(sb, bg, b.data)) {
 				ext4_dbg(DEBUG_IALLOC,
@@ -283,7 +290,7 @@ int ext4_ialloc_alloc_inode(struct ext4_fs *fs, uint32_t *idx, bool is_dir)
 			uint32_t idx_in_bg;
 
 			inodes_in_bg = ext4_inodes_in_group_cnt(sb, bgid);
-			rc = ext4_bmap_bit_find_clr(b.data, 0, inodes_in_bg,
+			rc = ext4_bmap_bit_find_clr(&b, 0, inodes_in_bg,
 						    &idx_in_bg);
 			/* Block group has not any free i-node */
 			if (rc == ENOSPC) {
@@ -363,6 +370,19 @@ int ext4_ialloc_alloc_inode(struct ext4_fs *fs, uint32_t *idx, bool is_dir)
 	}
 
 	return ENOSPC;
+}
+
+int ext4_ialloc_alloc_inode(struct ext4_fs *fs, uint32_t *idx, bool is_dir)
+{
+	int r = __ext4_ialloc_alloc_inode(fs, idx, is_dir);
+	if (r == ENOSPC) {
+		r = ext4_trans_journal_flush(fs->bdev);
+		if (r != EOK)
+			return r;
+
+		r = __ext4_ialloc_alloc_inode(fs, idx, is_dir);
+	}
+	return r;
 }
 
 /**

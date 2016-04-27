@@ -79,6 +79,26 @@ int ext4_trans_block_get(struct ext4_blockdev *bdev,
 int ext4_trans_try_revoke_block(struct ext4_blockdev *bdev,
 			       uint64_t lba);
 
+/**@brief  Copy the buffer content before making any modications.
+ * @param  bdev block device descriptor
+ * @param  block descriptor
+ * @return standard error code.*/
+int ext4_trans_freeze_data(struct ext4_blockdev *bdev,
+			   struct ext4_block *b);
+
+/**@brief  Get the previous versions of block data that is
+ *         still in buffer window.
+ * @param  bdev block device descriptor
+ * @param  buf logged buffer
+ * @return pointer to previous version of data */
+void *ext4_trans_prev_data(struct ext4_blockdev *bdev,
+			   struct ext4_buf *buf);
+
+/**@brief  Flush uncommitted transaction to disk
+ * @param  bdev block device descriptor
+ * @return standard error code*/
+int ext4_trans_journal_flush(struct ext4_blockdev *bdev);
+
 #ifdef __cplusplus
 }
 #endif

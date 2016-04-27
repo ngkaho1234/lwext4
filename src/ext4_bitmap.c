@@ -41,6 +41,8 @@
 #include "ext4_debug.h"
 
 #include "ext4_bitmap.h"
+#include "ext4_blockdev.h"
+#include "ext4_trans.h"
 
 void ext4_bmap_bits_free(uint8_t *bmap, uint32_t sbit, uint32_t bcnt)
 {
@@ -87,8 +89,9 @@ void ext4_bmap_bits_free(uint8_t *bmap, uint32_t sbit, uint32_t bcnt)
 	}
 }
 
-int ext4_bmap_bit_find_clr(uint8_t *bmap, uint32_t sbit, uint32_t ebit,
-			   uint32_t *bit_id)
+static inline int
+__ext4_bmap_bit_find_clr(uint8_t *bmap, uint32_t sbit, uint32_t ebit,
+			 uint32_t *bit_id)
 {
 	uint32_t i;
 	uint32_t bcnt = ebit - sbit;
@@ -100,7 +103,7 @@ int ext4_bmap_bit_find_clr(uint8_t *bmap, uint32_t sbit, uint32_t ebit,
 		if (!bcnt)
 			return ENOSPC;
 
-		if (ext4_bmap_is_bit_clr(bmap, i)) {
+		if (__ext4_bmap_is_bit_clr(bmap, i)) {
 			*bit_id = sbit;
 			return EOK;
 		}
@@ -135,7 +138,7 @@ finish_it:
 	while (bcnt >= 8) {
 		if (*bmap != 0xFF) {
 			for (i = 0; i < 8; ++i) {
-				if (ext4_bmap_is_bit_clr(bmap, i)) {
+				if (__ext4_bmap_is_bit_clr(bmap, i)) {
 					*bit_id = sbit + i;
 					return EOK;
 				}
@@ -148,13 +151,38 @@ finish_it:
 	}
 
 	for (i = 0; i < bcnt; ++i) {
-		if (ext4_bmap_is_bit_clr(bmap, i)) {
+		if (__ext4_bmap_is_bit_clr(bmap, i)) {
 			*bit_id = sbit + i;
 			return EOK;
 		}
 	}
 
 	return ENOSPC;
+}
+
+int ext4_bmap_bit_find_clr(struct ext4_block *bmap_block,
+			   uint32_t sbit,
+			   uint32_t ebit,
+			   uint32_t *bit_id)
+{
+	int r;
+	uint8_t *ptr;
+	uint32_t ret_bit_id;
+	ptr = ext4_trans_prev_data(bmap_block->buf->bc->bdev,
+			bmap_block->buf);
+again:
+	if (sbit >= ebit)
+		return ENOSPC;
+
+	r = __ext4_bmap_bit_find_clr(bmap_block->data, sbit, ebit, &ret_bit_id);
+	if (r == EOK) {
+		if (ptr && !__ext4_bmap_is_bit_clr(ptr, ret_bit_id)) {
+			sbit = ret_bit_id + 1;
+			goto again;
+		}
+	}
+	*bit_id = ret_bit_id;
+	return EOK;
 }
 
 /**

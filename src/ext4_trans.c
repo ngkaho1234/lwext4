@@ -86,6 +86,20 @@ int ext4_trans_block_get(struct ext4_blockdev *bdev,
 	return r;
 }
 
+int ext4_trans_freeze_data(struct ext4_blockdev *bdev,
+			   struct ext4_block *b)
+{
+	int r = EOK;
+#if CONFIG_JOURNALING_ENABLE
+	struct ext4_fs *fs = bdev->fs;
+	if (fs->jbd_journal && fs->curr_trans)
+		r = jbd_trans_freeze_data(fs->jbd_journal,
+					  fs->curr_trans,
+					  b);
+#endif
+	return r;
+}
+
 int ext4_trans_try_revoke_block(struct ext4_blockdev *bdev __unused,
 			        uint64_t lba __unused)
 {
@@ -98,6 +112,30 @@ int ext4_trans_try_revoke_block(struct ext4_blockdev *bdev __unused,
 	} else if (fs->jbd_journal) {
 		r = ext4_block_flush_lba(fs->bdev, lba);
 	}
+#endif
+	return r;
+}
+
+void *ext4_trans_prev_data(struct ext4_blockdev *bdev,
+			   struct ext4_buf *buf)
+{
+	void *ptr = NULL;
+#if CONFIG_JOURNALING_ENABLE
+	struct ext4_fs *fs = bdev->fs;
+	if (fs->jbd_journal) {
+		ptr = jbd_journal_prev_data(buf);
+	}
+#endif
+	return ptr;
+}
+
+int ext4_trans_journal_flush(struct ext4_blockdev *bdev)
+{
+	int r = EOK;
+#if CONFIG_JOURNALING_ENABLE
+	struct ext4_fs *fs = bdev->fs;
+	if (fs->jbd_journal)
+		r = jbd_journal_flush(fs->jbd_journal);
 #endif
 	return r;
 }

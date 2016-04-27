@@ -225,9 +225,7 @@ int ext4_balloc_free_block(struct ext4_inode_ref *inode_ref, ext4_fsblk_t baddr)
 	}
 	ext4_bcache_invalidate_lba(fs->bdev->bc, baddr, 1);
 	/* Release block group reference */
-	rc = ext4_fs_put_block_group_ref(&bg_ref);
-
-	return rc;
+	return ext4_fs_put_block_group_ref(&bg_ref);
 }
 
 int ext4_balloc_free_blocks(struct ext4_inode_ref *inode_ref,
@@ -344,13 +342,12 @@ int ext4_balloc_free_blocks(struct ext4_inode_ref *inode_ref,
 	ext4_bcache_invalidate_lba(fs->bdev->bc, first, count);
 	/*All blocks should be released*/
 	ext4_assert(count == 0);
-
 	return rc;
 }
 
-int ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
-			    ext4_fsblk_t goal,
-			    ext4_fsblk_t *fblock)
+static inline int __ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
+					    ext4_fsblk_t goal,
+					    ext4_fsblk_t *fblock)
 {
 	ext4_fsblk_t alloc = 0;
 	ext4_fsblk_t bmp_blk_adr;
@@ -398,6 +395,13 @@ int ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 		return r;
 	}
 
+	r = ext4_trans_freeze_data(inode_ref->fs->bdev, &b);
+	if (r != EOK) {
+		ext4_block_set(inode_ref->fs->bdev, &b);
+		ext4_fs_put_block_group_ref(&bg_ref);
+		return r;
+	}
+
 	if (!ext4_balloc_verify_bitmap_csum(sb, bg, b.data)) {
 		ext4_dbg(DEBUG_BALLOC,
 			DBG_WARN "Bitmap checksum failed."
@@ -406,7 +410,7 @@ int ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 	}
 
 	/* Check if goal is free */
-	if (ext4_bmap_is_bit_clr(b.data, idx_in_bg)) {
+	if (ext4_bmap_is_bit_clr(&b, idx_in_bg)) {
 		ext4_bmap_bit_set(b.data, idx_in_bg);
 		ext4_balloc_set_bitmap_csum(sb, bg_ref.block_group,
 					    b.data);
@@ -430,7 +434,7 @@ int ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 	/* Try to find free block near to goal */
 	uint32_t tmp_idx;
 	for (tmp_idx = idx_in_bg + 1; tmp_idx < end_idx; ++tmp_idx) {
-		if (ext4_bmap_is_bit_clr(b.data, tmp_idx)) {
+		if (ext4_bmap_is_bit_clr(&b, tmp_idx)) {
 			ext4_bmap_bit_set(b.data, tmp_idx);
 
 			ext4_balloc_set_bitmap_csum(sb, bg, b.data);
@@ -445,7 +449,7 @@ int ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 	}
 
 	/* Find free bit in bitmap */
-	r = ext4_bmap_bit_find_clr(b.data, idx_in_bg, blk_in_bg, &rel_blk_idx);
+	r = ext4_bmap_bit_find_clr(&b, idx_in_bg, blk_in_bg, &rel_blk_idx);
 	if (r == EOK) {
 		ext4_bmap_bit_set(b.data, rel_blk_idx);
 		ext4_balloc_set_bitmap_csum(sb, bg_ref.block_group, b.data);
@@ -496,6 +500,13 @@ goal_failed:
 			return r;
 		}
 
+		r = ext4_trans_freeze_data(inode_ref->fs->bdev, &b);
+		if (r != EOK) {
+			ext4_block_set(inode_ref->fs->bdev, &b);
+			ext4_fs_put_block_group_ref(&bg_ref);
+			return r;
+		}
+
 		if (!ext4_balloc_verify_bitmap_csum(sb, bg, b.data)) {
 			ext4_dbg(DEBUG_BALLOC,
 				DBG_WARN "Bitmap checksum failed."
@@ -512,7 +523,7 @@ goal_failed:
 		if (idx_in_bg < first_in_bg_index)
 			idx_in_bg = first_in_bg_index;
 
-		r = ext4_bmap_bit_find_clr(b.data, idx_in_bg, blk_in_bg,
+		r = ext4_bmap_bit_find_clr(&b, idx_in_bg, blk_in_bg,
 				&rel_blk_idx);
 		if (r == EOK) {
 			ext4_bmap_bit_set(b.data, rel_blk_idx);
@@ -577,8 +588,24 @@ success:
 	return r;
 }
 
-int ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
-				ext4_fsblk_t baddr, bool *free)
+int ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
+			    ext4_fsblk_t goal,
+			    ext4_fsblk_t *fblock)
+{
+	int r = __ext4_balloc_alloc_block(inode_ref, goal, fblock);
+	if (r == ENOSPC) {
+		r = ext4_trans_journal_flush(inode_ref->fs->bdev);
+		if (r != EOK)
+			return r;
+
+		r = __ext4_balloc_alloc_block(inode_ref, goal, fblock);
+	}
+	return r;
+}
+
+static inline int
+__ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
+			      ext4_fsblk_t baddr, bool *free)
 {
 	int rc;
 
@@ -605,6 +632,12 @@ int ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
 		ext4_fs_put_block_group_ref(&bg_ref);
 		return rc;
 	}
+	rc = ext4_trans_freeze_data(fs->bdev, &b);
+	if (rc != EOK) {
+		ext4_block_set(fs->bdev, &b);
+		ext4_fs_put_block_group_ref(&bg_ref);
+		return rc;
+	}
 
 	if (!ext4_balloc_verify_bitmap_csum(sb, bg_ref.block_group, b.data)) {
 		ext4_dbg(DEBUG_BALLOC,
@@ -614,7 +647,7 @@ int ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
 	}
 
 	/* Check if block is free */
-	*free = ext4_bmap_is_bit_clr(b.data, index_in_group);
+	*free = ext4_bmap_is_bit_clr(&b, index_in_group);
 
 	/* Allocate block if possible */
 	if (*free) {
@@ -657,6 +690,20 @@ int ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
 
 terminate:
 	return ext4_fs_put_block_group_ref(&bg_ref);
+}
+
+int ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
+				ext4_fsblk_t baddr, bool *free)
+{
+	int r = __ext4_balloc_try_alloc_block(inode_ref, baddr, free);
+	if (r == ENOSPC) {
+		r = ext4_trans_journal_flush(inode_ref->fs->bdev);
+		if (r != EOK)
+			return r;
+
+		r = __ext4_balloc_try_alloc_block(inode_ref, baddr, free);
+	}
+	return r;
 }
 
 /**
