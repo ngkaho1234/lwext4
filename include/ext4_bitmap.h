@@ -51,7 +51,7 @@ extern "C" {
 /**@brief   Set bitmap bit.
  * @param   bmap bitmap
  * @param   bit bit to set*/
-static inline void ext4_bmap_bit_set(uint8_t *bmap, uint32_t bit)
+static inline void __ext4_bmap_bit_set(uint8_t *bmap, uint32_t bit)
 {
 	*(bmap + (bit >> 3)) |= (1 << (bit & 7));
 }
@@ -59,7 +59,7 @@ static inline void ext4_bmap_bit_set(uint8_t *bmap, uint32_t bit)
 /**@brief   Clear bitmap bit.
  * @param   bmap bitmap buffer
  * @param   bit bit to clear*/
-static inline void ext4_bmap_bit_clr(uint8_t *bmap, uint32_t bit)
+static inline void __ext4_bmap_bit_clr(uint8_t *bmap, uint32_t bit)
 {
 	*(bmap + (bit >> 3)) &= ~(1 << (bit & 7));
 }
@@ -78,6 +78,40 @@ static inline bool __ext4_bmap_is_bit_set(uint8_t *bmap, uint32_t bit)
 static inline bool __ext4_bmap_is_bit_clr(uint8_t *bmap, uint32_t bit)
 {
 	return !__ext4_bmap_is_bit_set(bmap, bit);
+}
+
+/**@brief   Free range of bits in bitmap.
+ * @param   bmap bitmap buffer
+ * @param   sbit start bit
+ * @param   bcnt bit count*/
+void __ext4_bmap_bits_free(uint8_t *bmap, uint32_t sbit, uint32_t bcnt);
+
+/**@brief   Find first clear bit in bitmap.
+ *          Buffers data in journal that is not committed to disk
+ *          is also considered.
+ * @param   bmap bitmap buffer
+ * @param   ebit end bit of search
+ * @param   bit_id output parameter (first free bit)
+ * @return  standard error code*/
+int __ext4_bmap_bit_find_clr(uint8_t *bmap, uint32_t sbit, uint32_t ebit,
+			     uint32_t *bit_id);
+
+/**@brief   Set bitmap bit.
+ * @param   bmap_block bitmap buffer
+ * @param   bit bit to set*/
+static inline void
+ext4_bmap_bit_set(struct ext4_block *bmap_block, uint32_t bit)
+{
+	__ext4_bmap_bit_set(bmap_block->data, bit);
+}
+
+/**@brief   Clear bitmap bit.
+ * @param   bmap_block bitmap buffer
+ * @param   bit bit to clear*/
+static inline void
+ext4_bmap_bit_clr(struct ext4_block *bmap_block, uint32_t bit)
+{
+	__ext4_bmap_bit_clr(bmap_block->data, bit);
 }
 
 /**@brief   Check if the bitmap bit is set.
@@ -109,10 +143,14 @@ static inline bool ext4_bmap_is_bit_clr(struct ext4_block *bmap_block,
 }
 
 /**@brief   Free range of bits in bitmap.
- * @param   bmap bitmap buffer
+ * @param   bmap_block bitmap buffer
  * @param   sbit start bit
  * @param   bcnt bit count*/
-void ext4_bmap_bits_free(uint8_t *bmap, uint32_t sbit, uint32_t bcnt);
+static inline void
+ext4_bmap_bits_free(struct ext4_block *bmap_block, uint32_t sbit, uint32_t bcnt)
+{
+	__ext4_bmap_bits_free(bmap_block->data, sbit, bcnt);
+}
 
 /**@brief   Find first clear bit in bitmap.
  *          Buffers data in journal that is not committed to disk
@@ -121,10 +159,31 @@ void ext4_bmap_bits_free(uint8_t *bmap, uint32_t sbit, uint32_t bcnt);
  * @param   ebit end bit of search
  * @param   bit_id output parameter (first free bit)
  * @return  standard error code*/
-int ext4_bmap_bit_find_clr(struct ext4_block *bmap_block,
-			   uint32_t sbit,
-			   uint32_t ebit,
-			   uint32_t *bit_id);
+static inline int
+ext4_bmap_bit_find_clr(struct ext4_block *bmap_block,
+		       uint32_t sbit,
+		       uint32_t ebit,
+		       uint32_t *bit_id)
+{
+	int r;
+	uint8_t *ptr;
+	uint32_t ret_bit_id;
+	ptr = ext4_trans_prev_data(bmap_block->buf->bc->bdev,
+			bmap_block->buf);
+again:
+	if (sbit >= ebit)
+		return ENOSPC;
+
+	r = __ext4_bmap_bit_find_clr(bmap_block->data, sbit, ebit, &ret_bit_id);
+	if (r == EOK) {
+		if (ptr && !__ext4_bmap_is_bit_clr(ptr, ret_bit_id)) {
+			sbit = ret_bit_id + 1;
+			goto again;
+		}
+	}
+	*bit_id = ret_bit_id;
+	return EOK;
+}
 
 #ifdef __cplusplus
 }

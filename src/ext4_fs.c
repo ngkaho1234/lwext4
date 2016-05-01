@@ -277,7 +277,7 @@ static void ext4_fs_mark_bitmap_end(int start_bit, int end_bit, void *bitmap)
 		return;
 
 	for (i = start_bit; (unsigned)i < ((start_bit + 7) & ~7UL); i++)
-		ext4_bmap_bit_set(bitmap, i);
+		__ext4_bmap_bit_set(bitmap, i);
 
 	if (i < end_bit)
 		memset((char *)bitmap + (i >> 3), 0xff, (end_bit - i) >> 3);
@@ -330,7 +330,7 @@ static int ext4_fs_init_block_bitmap(struct ext4_block_group_ref *bg_ref)
 		bit_max += ext4_bg_num_gdb(sb, bg_ref->index);
 	}
 	for (bit = 0; bit < bit_max; bit++)
-		ext4_bmap_bit_set(block_bitmap.data, bit);
+		ext4_bmap_bit_set(&block_bitmap, bit);
 
 	if (bg_ref->index == ext4_block_group_cnt(sb) - 1) {
 		/*
@@ -350,18 +350,18 @@ static int ext4_fs_init_block_bitmap(struct ext4_block_group_ref *bg_ref)
 	bool in_bg;
 	in_bg = ext4_block_in_group(sb, bmp_blk, bg_ref->index);
 	if (!flex_bg || in_bg)
-		ext4_bmap_bit_set(block_bitmap.data,
+		ext4_bmap_bit_set(&block_bitmap,
 				  (uint32_t)(bmp_blk - first_bg));
 
 	in_bg = ext4_block_in_group(sb, bmp_inode, bg_ref->index);
 	if (!flex_bg || in_bg)
-		ext4_bmap_bit_set(block_bitmap.data,
+		ext4_bmap_bit_set(&block_bitmap,
 				  (uint32_t)(bmp_inode - first_bg));
 
         for (i = inode_table; i < inode_table + inode_table_bcnt; i++) {
 		in_bg = ext4_block_in_group(sb, i, bg_ref->index);
 		if (!flex_bg || in_bg)
-			ext4_bmap_bit_set(block_bitmap.data,
+			ext4_bmap_bit_set(&block_bitmap,
 					  (uint32_t)(i - first_bg));
 	}
         /*
@@ -408,7 +408,7 @@ static int ext4_fs_init_inode_bitmap(struct ext4_block_group_ref *bg_ref)
 
 	uint32_t i;
 	for (i = start_bit; i < ((start_bit + 7) & ~7UL); i++)
-		ext4_bmap_bit_set(b.data, i);
+		ext4_bmap_bit_set(&b, i);
 
 	if (i < end_bit)
 		memset(b.data + (i >> 3), 0xff, (end_bit - i) >> 3);

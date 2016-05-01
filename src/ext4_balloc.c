@@ -185,7 +185,7 @@ int ext4_balloc_free_block(struct ext4_inode_ref *inode_ref, ext4_fsblk_t baddr)
 	}
 
 	/* Modify bitmap */
-	ext4_bmap_bit_clr(bitmap_block.data, index_in_group);
+	ext4_bmap_bit_clr(&bitmap_block, index_in_group);
 	ext4_balloc_set_bitmap_csum(sb, bg, bitmap_block.data);
 	ext4_trans_set_block_dirty(bitmap_block.buf);
 
@@ -288,7 +288,7 @@ int ext4_balloc_free_blocks(struct ext4_inode_ref *inode_ref,
 		free_cnt = count > free_cnt ? free_cnt : count;
 
 		/* Modify bitmap */
-		ext4_bmap_bits_free(blk.data, idx_in_bg_first, free_cnt);
+		ext4_bmap_bits_free(&blk, idx_in_bg_first, free_cnt);
 		ext4_balloc_set_bitmap_csum(sb, bg, blk.data);
 		ext4_trans_set_block_dirty(blk.buf);
 
@@ -411,7 +411,7 @@ static inline int __ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 
 	/* Check if goal is free */
 	if (ext4_bmap_is_bit_clr(&b, idx_in_bg)) {
-		ext4_bmap_bit_set(b.data, idx_in_bg);
+		ext4_bmap_bit_set(&b, idx_in_bg);
 		ext4_balloc_set_bitmap_csum(sb, bg_ref.block_group,
 					    b.data);
 		ext4_trans_set_block_dirty(b.buf);
@@ -435,7 +435,7 @@ static inline int __ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 	uint32_t tmp_idx;
 	for (tmp_idx = idx_in_bg + 1; tmp_idx < end_idx; ++tmp_idx) {
 		if (ext4_bmap_is_bit_clr(&b, tmp_idx)) {
-			ext4_bmap_bit_set(b.data, tmp_idx);
+			ext4_bmap_bit_set(&b, tmp_idx);
 
 			ext4_balloc_set_bitmap_csum(sb, bg, b.data);
 			ext4_trans_set_block_dirty(b.buf);
@@ -451,7 +451,7 @@ static inline int __ext4_balloc_alloc_block(struct ext4_inode_ref *inode_ref,
 	/* Find free bit in bitmap */
 	r = ext4_bmap_bit_find_clr(&b, idx_in_bg, blk_in_bg, &rel_blk_idx);
 	if (r == EOK) {
-		ext4_bmap_bit_set(b.data, rel_blk_idx);
+		ext4_bmap_bit_set(&b, rel_blk_idx);
 		ext4_balloc_set_bitmap_csum(sb, bg_ref.block_group, b.data);
 		ext4_trans_set_block_dirty(b.buf);
 		r = ext4_block_set(inode_ref->fs->bdev, &b);
@@ -526,7 +526,7 @@ goal_failed:
 		r = ext4_bmap_bit_find_clr(&b, idx_in_bg, blk_in_bg,
 				&rel_blk_idx);
 		if (r == EOK) {
-			ext4_bmap_bit_set(b.data, rel_blk_idx);
+			ext4_bmap_bit_set(&b, rel_blk_idx);
 			ext4_balloc_set_bitmap_csum(sb, bg, b.data);
 			ext4_trans_set_block_dirty(b.buf);
 			r = ext4_block_set(inode_ref->fs->bdev, &b);
@@ -651,7 +651,7 @@ __ext4_balloc_try_alloc_block(struct ext4_inode_ref *inode_ref,
 
 	/* Allocate block if possible */
 	if (*free) {
-		ext4_bmap_bit_set(b.data, index_in_group);
+		ext4_bmap_bit_set(&b, index_in_group);
 		ext4_balloc_set_bitmap_csum(sb, bg_ref.block_group, b.data);
 		ext4_trans_set_block_dirty(b.buf);
 	}
