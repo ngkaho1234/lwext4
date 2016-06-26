@@ -429,7 +429,7 @@ int ext4_removexattr(const char *path, const char *name, size_t name_len);
 
 /*********************************DIRECTORY OPERATION***********************/
 
-/**@brief   Recursive directory remove.
+/**@brief   Remove directory.
  * @param   path directory path to remove
  * @return  standard error code*/
 int ext4_dir_rm(const char *path);
