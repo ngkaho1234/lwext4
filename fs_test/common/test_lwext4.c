@@ -29,8 +29,10 @@
 #include "../common/test_lwext4.h"
 
 #include <ext4.h>
+#include <ext4_inode.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <inttypes.h>
 #include <string.h>
 
@@ -78,6 +80,83 @@ static void printf_io_timings(long int diff)
 	printf("  io_read: %.3f%%\n", (double)stats->io_read);
 	printf("  io_write: %.3f%%\n", (double)stats->io_write);
 	printf("  io_cpu: %.3f%%\n", (double)stats->cpu);
+}
+
+static int __dir_rm(const char *path)
+{
+	int rc;
+	ext4_dir dir;
+	struct ext4_sblock *sb;
+	const ext4_direntry *entry;
+	rc = ext4_get_sblock(path, &sb);
+	if (rc != EOK)
+		goto out;
+
+	while (rc == EOK) {
+		uint32_t ino;
+		struct ext4_inode inode;
+		size_t path_len = 0;
+
+		char *entry_path = NULL;
+
+		rc = ext4_dir_open(&dir, path);
+		if (rc != EOK)
+			break;
+
+		entry = ext4_dir_entry_next(&dir);
+		if (entry == NULL) {
+			ext4_dir_close(&dir);
+			break;
+		}
+
+		if (entry->name_length == 1 && entry->name[0] == '.')
+			entry = ext4_dir_entry_next(&dir);
+
+		if (entry && entry->name_length == 2 &&
+		    entry->name[0] == '.' &&
+		    entry->name[1] == '.')
+			entry = ext4_dir_entry_next(&dir);
+
+		if (entry) {
+			path_len = strlen(path) + entry->name_length + 2;
+			ext4_dir_close(&dir);
+		} else {
+			ext4_dir_close(&dir);
+			break;
+		}
+
+		entry_path = malloc(path_len);
+		if (!entry_path) {
+			rc = ENOMEM;
+			break;
+		}
+
+		memset(entry_path, 0, path_len);
+		strcpy(entry_path, path);
+		strcat(entry_path, "/");
+		strncat(entry_path, entry->name, entry->name_length);
+
+		rc = ext4_fill_raw_inode(entry_path, &ino, &inode);
+		if (rc != EOK)
+			goto reclaim;
+
+		if (!ext4_inode_is_type(sb, &inode, EXT4_INODE_MODE_DIRECTORY))
+			rc = ext4_fremove(entry_path);
+		else
+			rc = __dir_rm(entry_path);
+
+reclaim:
+		free(entry_path);
+
+	}
+	if (rc == ENOENT)
+		printf("__dir_rm: path: %s headed to stale diretory!\n", path);
+
+out:
+	if (rc == EOK)
+		rc = ext4_dir_rm(path);
+
+	return rc;
 }
 
 void test_lwext4_dir_ls(const char *path)
@@ -306,9 +385,9 @@ void test_lwext4_cleanup(void)
 	printf("remove /mp/dir1\n");
 	io_timings_clear();
 	start = get_ms();
-	r = ext4_dir_rm("/mp/dir1");
+	r = __dir_rm("/mp/dir1");
 	if (r != EOK && r != ENOENT) {
-		printf("ext4_fremove ext4_dir_rm: rc = %d\n", r);
+		printf("ext4_fremove __dir_rm: rc = %d\n", r);
 	}
 	stop = get_ms();
 	diff = stop - start;

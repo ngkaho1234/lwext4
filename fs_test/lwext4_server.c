@@ -49,6 +49,7 @@
 #endif
 
 #include <ext4.h>
+#include <ext4_inode.h>
 #include "../blockdev/linux/ext4_filedev.h"
 #include "../blockdev/windows/io_raw.h"
 
@@ -745,6 +746,83 @@ int _fsize(char *p)
 	return EOK;
 }
 
+static int __dir_rm(const char *path)
+{
+	int rc;
+	ext4_dir dir;
+	struct ext4_sblock *sb;
+	const ext4_direntry *entry;
+	rc = ext4_get_sblock(path, &sb);
+	if (rc != EOK)
+		goto out;
+
+	while (rc == EOK) {
+		uint32_t ino;
+		struct ext4_inode inode;
+		size_t path_len = 0;
+
+		char *entry_path = NULL;
+
+		rc = ext4_dir_open(&dir, path);
+		if (rc != EOK)
+			break;
+
+		entry = ext4_dir_entry_next(&dir);
+		if (entry == NULL) {
+			ext4_dir_close(&dir);
+			break;
+		}
+
+		if (entry->name_length == 1 && entry->name[0] == '.')
+			entry = ext4_dir_entry_next(&dir);
+
+		if (entry && entry->name_length == 2 &&
+		    entry->name[0] == '.' &&
+		    entry->name[1] == '.')
+			entry = ext4_dir_entry_next(&dir);
+
+		if (entry) {
+			path_len = strlen(path) + entry->name_length + 2;
+			ext4_dir_close(&dir);
+		} else {
+			ext4_dir_close(&dir);
+			break;
+		}
+
+		entry_path = malloc(path_len);
+		if (!entry_path) {
+			rc = ENOMEM;
+			break;
+		}
+
+		memset(entry_path, 0, path_len);
+		strcpy(entry_path, path);
+		strcat(entry_path, "/");
+		strncat(entry_path, entry->name, entry->name_length);
+
+		rc = ext4_fill_raw_inode(entry_path, &ino, &inode);
+		if (rc != EOK)
+			goto reclaim;
+
+		if (!ext4_inode_is_type(sb, &inode, EXT4_INODE_MODE_DIRECTORY))
+			rc = ext4_fremove(entry_path);
+		else
+			rc = __dir_rm(entry_path);
+
+reclaim:
+		free(entry_path);
+
+	}
+	if (rc == ENOENT)
+		printf("__dir_rm: path: %s headed to stale diretory!\n", path);
+
+out:
+	if (rc == EOK)
+		rc = ext4_dir_rm(path);
+
+	return rc;
+}
+
 int _dir_rm(char *p)
 {
 	char path[255];
@@ -754,7 +832,7 @@ int _dir_rm(char *p)
 		return -1;
 	}
 
-	return ext4_dir_rm(path);
+	return __dir_rm(path);
 }
 
 int _dir_mk(char *p)
@@ -1045,7 +1123,7 @@ int _multi_dremove(char *p)
 
 	for (i = 0; i < cnt; ++i) {
 		sprintf(path1, "%s%s%d", path, prefix, i);
-		rc = ext4_dir_rm(path1);
+		rc = __dir_rm(path1);
 		if (rc != EOK)
 			break;
 	}
