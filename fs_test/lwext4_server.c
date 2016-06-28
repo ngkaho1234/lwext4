@@ -781,16 +781,16 @@ static int __dir_rm(const char *path)
 		    entry->name[1] == '.')
 			entry = ext4_dir_entry_next(&dir);
 
-		if (entry) {
+		if (entry)
 			path_len = strlen(path) + entry->name_length + 2;
-			ext4_dir_close(&dir);
-		} else {
+		else {
 			ext4_dir_close(&dir);
 			break;
 		}
 
 		entry_path = malloc(path_len);
 		if (!entry_path) {
+			ext4_dir_close(&dir);
 			rc = ENOMEM;
 			break;
 		}
@@ -799,6 +799,8 @@ static int __dir_rm(const char *path)
 		strcpy(entry_path, path);
 		strcat(entry_path, "/");
 		strncat(entry_path, entry->name, entry->name_length);
+
+		ext4_dir_close(&dir);
 
 		rc = ext4_fill_raw_inode(entry_path, &ino, &inode);
 		if (rc != EOK)
