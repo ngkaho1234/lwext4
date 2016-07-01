@@ -65,6 +65,22 @@ struct ext4_lock {
 	void (*unlock)(void);
 };
 
+/**@brief   OS dependent mutex interface.*/
+struct ext4_mutex {
+
+	/**@brief   Mutex allocation interface*/
+	void *(*alloc)(void);
+
+	/**@brief   Mutex deallocation interface*/
+	void (*free)(void *mutex);
+
+	/**@brief   Lock routine*/
+	void (*lock)(void *mutex);
+
+	/**@brief   Unlock routine*/
+	void (*unlock)(void *mutex);
+};
+
 /********************************FILE DESCRIPTOR*****************************/
 
 /**@brief   File descriptor*/
@@ -108,33 +124,19 @@ typedef struct ext4_dir {
 
 /********************************MOUNT OPERATIONS****************************/
 
-/**@brief   Register a block device to a name.
- *          @warning Block device has to be filled by
- *          Block cache may by created automatically when bc parameter is NULL.
- * @param   bd block device
- * @param   bd block device cache
- * @param   dev_name register name
- * @param   standard error code*/
-int ext4_device_register(struct ext4_blockdev *bd, struct ext4_bcache *bc,
-			 const char *dev_name);
-
 /**@brief   Mount a block device with EXT4 partition to the mount point.
- * @param   dev_name block device name (@ref ext4_device_register)
- * @param   mount_point mount point, for example
- *          -   /
- *          -   /my_partition/
- *          -   /my_second_partition/
- * @param   read_only mount as read-only mode.
+ * @param   bdev block device
+ * @param   read_only mount as read-only mode
+ * @param   mountpoint the output mountpoint structure if this call succeeds
  *
  * @return standard error code */
-int ext4_mount(const char *dev_name,
-	       const char *mount_point,
-	       bool read_only);
+int ext4_mount(struct ext4_blockdev *bdev, bool read_only,
+	       void **mountpoint);
 
 /**@brief   Umount operation.
- * @param   mount_point mount name
+ * @param   mountpoint mountpoint structure
  * @return  standard error code */
-int ext4_umount(const char *mount_point);
+int ext4_umount(void *mp);
 
 /**@brief   Start journaling. Journaling start/stop functions are transparent
  *          and might be used on filesystems without journaling support.
@@ -146,21 +148,21 @@ int ext4_umount(const char *mount_point);
  *
  *              ext4_journal_stop("/");
  *              ext4_umount("/");
- * @param   mount_point mount name
+ * @param   mountpoint mountpoint structure
  * @return  standard error code */
-int ext4_journal_start(const char *mount_point);
+int ext4_journal_start(void *mountpoint);
 
 /**@brief   Stop journaling. Journaling start/stop functions are transparent
  *          and might be used on filesystems without journaling support.
- * @param   mount_point mount name
+ * @param   mountpoint mountpoint structure
  * @return  standard error code */
-int ext4_journal_stop(const char *mount_point);
+int ext4_journal_stop(void *mountpoint);
 
 /**@brief   Journal recovery.
- * @param   mount_point mount point
+ * @param   mountpoint mountpoint structure
  * @warning Must be called after @ref ext4_mount
  * @return standard error code */
-int ext4_recover(const char *mount_point);
+int ext4_recover(void *mountpoint);
 
 /**@brief   Some of the filesystem stats.*/
 struct ext4_mount_stats {
@@ -178,24 +180,24 @@ struct ext4_mount_stats {
 };
 
 /**@brief   Get file system params.
- * @param   mount_point mount path
+ * @param   mountpoint mountpoint structure
  * @param   stats ext fs stats
  * @return  standard error code */
-int ext4_mount_point_stats(const char *mount_point,
+int ext4_mount_point_stats(void *mountpoint,
 			   struct ext4_mount_stats *stats);
 
 /**@brief   Setup OS lock routines.
- * @param   mount_point mount path
+ * @param   mountpoint mountpoint structure
  * @param   locks - lock and unlock functions
  * @return  standard error code */
-int ext4_mount_setup_locks(const char *mount_point,
+int ext4_mount_setup_locks(void *mountpoint,
 			   const struct ext4_lock *locks);
 
 /**@brief   Acquire the filesystem superblock pointer of a mp.
- * @param   mount_point mount path
+ * @param   mountpoint mountpoint structure
  * @param   superblock pointer
  * @return  standard error code */
-int ext4_get_sblock(const char *mount_point, struct ext4_sblock **sb);
+int ext4_get_sblock(void *mountpoint, struct ext4_sblock **sb);
 
 /**@brief   Enable/disable write back cache mode.
  * @warning Default model of cache is write trough. It means that when You do:
@@ -228,32 +230,38 @@ int ext4_get_sblock(const char *mount_point, struct ext4_sblock **sb);
  * Write back mode is useful when you want to create a lot of empty
  * files/directories.
  *
- * @param   path mount point path
+ * @param   mountpoint mountpoint structure
  * @param   on enable/disable
  *
  * @return  standard error code */
-int ext4_cache_write_back(const char *path, bool on);
+int ext4_cache_write_back(void *mountpoint, bool on);
 
 /********************************FILE OPERATIONS*****************************/
 
 /**@brief   Remove file by path.
+ * @param   mountpoint mountpoint structure
  * @param   path path to file
  * @return  standard error code */
-int ext4_fremove(const char *path);
+int ext4_fremove(void *mountpoint, const char *path);
 
 /**@brief   create a hardlink for a file.
+ * @param   mountpoint mountpoint structure
  * @param   path path to file
  * @param   hardlink_path path of hardlink
  * @return  standard error code */
-int ext4_flink(const char *path, const char *hardlink_path);
+int ext4_flink(void *mountpoint,
+	       const char *path, const char *hardlink_path);
 
 /**@brief Rename file
+ * @param mountpoint mountpoint structure
  * @param path source
  * @param new_path destination
  * @return  standard error code */
-int ext4_frename(const char *path, const char *new_path);
+int ext4_frename(void *mountpoint,
+		 const char *path, const char *new_path);
 
 /**@brief   File open function.
+ * @param   mountpoint mountpoint structure
  * @param   path filename (has to start from mount point)
  *          /my_partition/my_file
  * @param   flags open file flags
@@ -272,14 +280,17 @@ int ext4_frename(const char *path, const char *new_path);
  *  |---------------------------------------------------------------|
  *
  * @return  standard error code*/
-int ext4_fopen(ext4_file *f, const char *path, const char *flags);
+int ext4_fopen(void *mountpoint,
+	       ext4_file *f, const char *path, const char *flags);
 
 /**@brief   Alternate file open function.
+ * @param   mountpoint mountpoint structure
  * @param   filename, (has to start from mount point)
  *          /my_partition/my_file
  * @param   flags open file flags
  * @return  standard error code*/
-int ext4_fopen2(ext4_file *f, const char *path, int flags);
+int ext4_fopen2(void *mountpoint,
+		ext4_file *f, const char *path, int flags);
 
 /**@brief   File close function.
  * @param   f file handle
@@ -287,11 +298,13 @@ int ext4_fopen2(ext4_file *f, const char *path, int flags);
 int ext4_fclose(ext4_file *f);
 
 /**@brief   Fill in the ext4_inode buffer.
+ * @param   mountpoint mountpoint structure
  * @param   path fetch inode data of the path
  * @param   ret_ino the inode id of the path
  * @param   ext4_inode buffer
  * @return  standard error code*/
-int ext4_fill_raw_inode(const char *path, uint32_t *ret_ino,
+int ext4_fill_raw_inode(void *mountpoint,
+			const char *path, uint32_t *ret_ino,
 			struct ext4_inode *inode);
 
 /**@brief   File truncate function.
@@ -337,60 +350,76 @@ uint64_t ext4_ftell(ext4_file *f);
 uint64_t ext4_fsize(ext4_file *f);
 
 /**@brief Change file/directory/link mode bits
+ * @param mountpoint mountpoint structure
  * @param path to file/dir/link
  * @param mode new mode bits (for example 0777)
  * @return  standard error code*/
-int ext4_chmod(const char *path, uint32_t mode);
+int ext4_chmod(void *mountpoint, const char *path, uint32_t mode);
 
 /**@brief Change file owner and group
+ * @param mountpoint mountpoint structure
  * @param path to file/dir/link
  * @param uid user id
  * @param gid group id
  * @return  standard error code*/
-int ext4_chown(const char *path, uint32_t uid, uint32_t gid);
+int ext4_chown(void *mountpoint,
+	       const char *path, uint32_t uid, uint32_t gid);
 
 /**@brief Set file access time
+ * @param mountpoint mountpoint structure
  * @param path to file/dir/link
  * @param atime access timestamp
  * @return  standard error code*/
-int ext4_file_set_atime(const char *path, uint32_t atime);
+int ext4_file_set_atime(void *mountpoint,
+			const char *path, uint32_t atime);
 
 /**@brief Set file modify time
+ * @param mountpoint mountpoint structure
  * @param path to file/dir/link
  * @param mtime modify timestamp
  * @return  standard error code*/
-int ext4_file_set_mtime(const char *path, uint32_t mtime);
+int ext4_file_set_mtime(void *mountpoint,
+			const char *path, uint32_t mtime);
 
 /**@brief Set file change time
+ * @param mountpoint mountpoint structure
  * @param path to file/dir/link
  * @param ctime change timestamp
  * @return  standard error code*/
-int ext4_file_set_ctime(const char *path, uint32_t ctime);
+int ext4_file_set_ctime(void *mountpoint,
+			const char *path, uint32_t ctime);
 
 /**@brief Create symbolic link
+ * @param mountpoint mountpoint structure
  * @param target destination path
  * @param path source entry
  * @return standard error code*/
-int ext4_fsymlink(const char *target, const char *path);
+int ext4_fsymlink(void *mountpoint,
+		  const char *target, const char *path);
 
 /**@brief Create special file
+ * @param mountpoint mountpoint structure
  * @param path path to new file
  * @param filetype The filetype of the new special file
  * 	  (that must not be regular file, directory, or unknown type)
  * @param dev if filetype is char device or block device,
  * 	  the device number will become the payload in the inode
  * @return standard error code*/
-int ext4_mknod(const char *path, int filetype, uint32_t dev);
+int ext4_mknod(void *mountpoint,
+	       const char *path, int filetype, uint32_t dev);
 
 /**@brief Read symbolic link payload
+ * @param mountpoint mountpoint structure
  * @param path to symlink
  * @param buf output buffer
  * @param bufsize output buffer max size
  * @param rcnt bytes read
  * @return standard error code*/
-int ext4_readlink(const char *path, char *buf, size_t bufsize, size_t *rcnt);
+int ext4_readlink(void *mountpoint,
+		  const char *path, char *buf, size_t bufsize, size_t *rcnt);
 
 /**@brief Set extended attribute
+ * @param mountpoint mountpoint structure
  * @param path to file/directory
  * @param name name of the entry to add
  * @param name_len length of @name in bytes
@@ -398,58 +427,71 @@ int ext4_readlink(const char *path, char *buf, size_t bufsize, size_t *rcnt);
  * @param data_size size of data to add
  * @param replace this boolean is deprecated.
  * @return standard error code*/
-int ext4_setxattr(const char *path, const char *name, size_t name_len,
+int ext4_setxattr(void *mountpoint,
+		  const char *path, const char *name, size_t name_len,
 		  const void *data, size_t data_size, bool replace);
 
 /**@brief Get extended attribute
+ * @param mountpoint mountpoint structure
  * @param path to file/directory
  * @param name name of the entry to get
  * @param name_len length of @name in bytes
  * @param data data of the entry to get
  * @param data_size size of data to get
  * @return standard error code*/
-int ext4_getxattr(const char *path, const char *name, size_t name_len,
+int ext4_getxattr(void *mountpoint,
+		  const char *path, const char *name, size_t name_len,
 		  void *buf, size_t buf_size, size_t *data_size);
 
 /**@brief List extended attributes
+ * @param mountpoint mountpoint structure
  * @param path to file/directory
  * @param list list to hold the name of entries
  * @param size size of @list in bytes
  * @param ret_size used bytes of @list
  * @return standard error code*/
-int ext4_listxattr(const char *path, char *list, size_t size, size_t *ret_size);
+int ext4_listxattr(void *mountpoint,
+		   const char *path, char *list, size_t size, size_t *ret_size);
 
 /**@brief Remove extended attribute
+ * @param mountpoint mountpoint structure
  * @param path to file/directory
  * @param name name of the entry to remove
  * @param name_len length of @name in bytes
  * @return standard error code*/
-int ext4_removexattr(const char *path, const char *name, size_t name_len);
+int ext4_removexattr(void *mountpoint,
+		     const char *path, const char *name, size_t name_len);
 
 
 /*********************************DIRECTORY OPERATION***********************/
 
 /**@brief   Remove directory.
+ * @param   mountpoint mountpoint structure
  * @param   path directory path to remove
  * @return  standard error code*/
-int ext4_dir_rm(const char *path);
+int ext4_dir_rm(void *mountpoint, const char *path);
 
 /**@brief Rename/move directory
+ * @param mountpoint mountpoint structure
  * @param path source
  * @param new_path destination
  * @return  standard error code */
-int ext4_dir_mv(const char *path, const char *new_path);
+int ext4_dir_mv(void *mountpoint,
+		const char *path, const char *new_path);
 
 /**@brief   Create new directory.
+ * @param   mountpoint mountpoint structure
  * @param   name new directory name
  * @return  standard error code*/
-int ext4_dir_mk(const char *path);
+int ext4_dir_mk(void *mountpoint, const char *path);
 
 /**@brief   Directory open.
+ * @param   mountpoint mountpoint structure
  * @param   d directory handle
  * @param   path directory path
  * @return  standard error code*/
-int ext4_dir_open(ext4_dir *d, const char *path);
+int ext4_dir_open(void *mountpoint,
+		  ext4_dir *d, const char *path);
 
 /**@brief   Directory close.
  * @param   d directory handle
