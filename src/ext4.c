@@ -820,10 +820,14 @@ static int ext4_generic_open2(struct ext4_mountpoint *mp,
 	f->flags = flags;
 
 	/*Skip slash*/
-	path += 1;
-
-	if (name_off)
-		*name_off = 1;
+	if (path[0] == '/') {
+		path += 1;
+		if (name_off)
+			*name_off = 1;
+	} else {
+		if (name_off)
+			*name_off = 0;
+	}
 
 	/*Load root*/
 	r = ext4_fs_get_inode_ref(fs, EXT4_INODE_ROOT_INDEX, &ref);
@@ -1015,7 +1019,8 @@ static int ext4_create_hardlink(struct ext4_mountpoint *mp,
 	struct ext4_sblock *const sb = &mp->fs.sb;
 
 	/*Skip slash*/
-	path += 1;
+	if (path[0] == '/')
+		path += 1;
 
 	/*Load root*/
 	r = ext4_fs_get_inode_ref(fs, EXT4_INODE_ROOT_INDEX, &ref);
