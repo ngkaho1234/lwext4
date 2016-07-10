@@ -79,6 +79,9 @@ static struct ext4_blockdev *bd;
 /**@brief   Block cache handle.*/
 static struct ext4_bcache *bc;
 
+/**@brief   Mountpoint handle.*/
+void *mount_point;
+
 static const char *usage = "                                    \n\
 Welcome in ext4 generic demo.                                   \n\
 Copyright (c) 2013 Grzegorz Kostka (kostka.grzegorz@gmail.com)  \n\
@@ -199,7 +202,11 @@ static bool parse_opt(int argc, char **argv)
 			verbose = true;
 			break;
 		case 'x':
+#ifdef VERSION
 			puts(VERSION);
+#else
+			puts("unknown");
+#endif
 			exit(0);
 			break;
 		default:
@@ -237,7 +244,7 @@ int main(int argc, char **argv)
 	if (sbstat)
 		test_lwext4_mp_stats();
 
-	test_lwext4_dir_ls("/mp/");
+	test_lwext4_dir_ls("/");
 	fflush(stdout);
 	if (!test_lwext4_dir_test(dir_cnt))
 		return EXIT_FAILURE;
@@ -256,7 +263,7 @@ int main(int argc, char **argv)
 	free(rw_buff);
 
 	fflush(stdout);
-	test_lwext4_dir_ls("/mp/");
+	test_lwext4_dir_ls("/");
 
 	if (sbstat)
 		test_lwext4_mp_stats();

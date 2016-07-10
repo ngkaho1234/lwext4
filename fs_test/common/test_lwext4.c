@@ -36,6 +36,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+extern void *mount_point;
 
 /**@brief   Block device handle.*/
 static struct ext4_blockdev *bd;
@@ -88,7 +89,7 @@ static int __dir_rm(const char *path)
 	ext4_dir dir;
 	struct ext4_sblock *sb;
 	const ext4_direntry *entry;
-	rc = ext4_get_sblock(path, &sb);
+	rc = ext4_get_sblock(mount_point, &sb);
 	if (rc != EOK)
 		goto out;
 
@@ -99,7 +100,7 @@ static int __dir_rm(const char *path)
 
 		char *entry_path = NULL;
 
-		rc = ext4_dir_open(&dir, path);
+		rc = ext4_dir_open(mount_point, &dir, path);
 		if (rc != EOK)
 			break;
 
@@ -136,12 +137,12 @@ static int __dir_rm(const char *path)
 		strcat(entry_path, "/");
 		strncat(entry_path, entry->name, entry->name_length);
 
-		rc = ext4_fill_raw_inode(entry_path, &ino, &inode);
+		rc = ext4_fill_raw_inode(mount_point, entry_path, &ino, &inode);
 		if (rc != EOK)
 			goto reclaim;
 
 		if (!ext4_inode_is_type(sb, &inode, EXT4_INODE_MODE_DIRECTORY))
-			rc = ext4_fremove(entry_path);
+			rc = ext4_fremove(mount_point, entry_path);
 		else
 			rc = __dir_rm(entry_path);
 
@@ -154,7 +155,7 @@ reclaim:
 
 out:
 	if (rc == EOK)
-		rc = ext4_dir_rm(path);
+		rc = ext4_dir_rm(mount_point, path);
 
 	return rc;
 }
@@ -167,7 +168,7 @@ void test_lwext4_dir_ls(const char *path)
 
 	printf("ls %s\n", path);
 
-	ext4_dir_open(&d, path);
+	ext4_dir_open(mount_point, &d, path);
 	de = ext4_dir_entry_next(&d);
 
 	while (de) {
@@ -182,7 +183,7 @@ void test_lwext4_dir_ls(const char *path)
 void test_lwext4_mp_stats(void)
 {
 	struct ext4_mount_stats stats;
-	ext4_mount_point_stats("/mp/", &stats);
+	ext4_mount_point_stats(mount_point, &stats);
 
 	printf("********************\n");
 	printf("ext4_mount_point_stats\n");
@@ -232,17 +233,17 @@ bool test_lwext4_dir_test(int len)
 	io_timings_clear();
 	start = get_ms();
 
-	printf("directory create: /mp/dir1\n");
-	r = ext4_dir_mk("/mp/dir1");
+	printf("directory create: /dir1\n");
+	r = ext4_dir_mk(mount_point, "/dir1");
 	if (r != EOK) {
 		printf("ext4_dir_mk: rc = %d\n", r);
 		return false;
 	}
 
-	printf("add files to: /mp/dir1\n");
+	printf("add files to: /dir1\n");
 	for (i = 0; i < len; ++i) {
-		sprintf(path, "/mp/dir1/f%d", i);
-		r = ext4_fopen(&f, path, "wb");
+		sprintf(path, "/dir1/f%d", i);
+		r = ext4_fopen(mount_point, &f, path, "wb");
 		if (r != EOK) {
 			printf("ext4_fopen: rc = %d\n", r);
 			return false;
@@ -251,7 +252,7 @@ bool test_lwext4_dir_test(int len)
 
 	stop = get_ms();
 	diff = stop - start;
-	test_lwext4_dir_ls("/mp/dir1");
+	test_lwext4_dir_ls("/dir1");
 	printf("test_lwext4_dir_test: time: %d ms\n", (int)diff);
 	printf("test_lwext4_dir_test: av: %d ms/entry\n", (int)diff / (len + 1));
 	printf_io_timings(diff);
@@ -287,13 +288,13 @@ bool test_lwext4_file_test(uint8_t *rw_buff, uint32_t rw_size, uint32_t rw_count
 	printf("  rw count: %" PRIu32 "\n", rw_count);
 
 	/*Add hello world file.*/
-	r = ext4_fopen(&f, "/mp/hello.txt", "wb");
+	r = ext4_fopen(mount_point, &f, "/hello.txt", "wb");
 	r = ext4_fwrite(&f, "Hello World !\n", strlen("Hello World !\n"), 0);
 	r = ext4_fclose(&f);
 
 	io_timings_clear();
 	start = get_ms();
-	r = ext4_fopen(&f, "/mp/test1", "wb");
+	r = ext4_fopen(mount_point, &f, "/test1", "wb");
 	if (r != EOK) {
 		printf("ext4_fopen ERROR = %d\n", r);
 		return false;
@@ -328,7 +329,7 @@ bool test_lwext4_file_test(uint8_t *rw_buff, uint32_t rw_size, uint32_t rw_count
 
 	io_timings_clear();
 	start = get_ms();
-	r = ext4_fopen(&f, "/mp/test1", "r+");
+	r = ext4_fopen(mount_point, &f, "/test1", "r+");
 	if (r != EOK) {
 		printf("ext4_fopen ERROR = %d\n", r);
 		return false;
@@ -371,21 +372,21 @@ void test_lwext4_cleanup(void)
 	int r;
 
 	printf("\ncleanup:\n");
-	r = ext4_fremove("/mp/hello.txt");
+	r = ext4_fremove(mount_point, "/hello.txt");
 	if (r != EOK && r != ENOENT) {
 		printf("ext4_fremove error: rc = %d\n", r);
 	}
 
-	printf("remove /mp/test1\n");
-	r = ext4_fremove("/mp/test1");
+	printf("remove /test1\n");
+	r = ext4_fremove(mount_point, "/test1");
 	if (r != EOK && r != ENOENT) {
 		printf("ext4_fremove error: rc = %d\n", r);
 	}
 
-	printf("remove /mp/dir1\n");
+	printf("remove /dir1\n");
 	io_timings_clear();
 	start = get_ms();
-	r = __dir_rm("/mp/dir1");
+	r = __dir_rm("/dir1");
 	if (r != EOK && r != ENOENT) {
 		printf("ext4_fremove __dir_rm: rc = %d\n", r);
 	}
@@ -409,31 +410,25 @@ bool test_lwext4_mount(struct ext4_blockdev *bdev, struct ext4_bcache *bcache)
 
 	ext4_dmask_set(DEBUG_ALL);
 
-	r = ext4_device_register(bd, bc ? bc : 0, "ext4_fs");
-	if (r != EOK) {
-		printf("ext4_device_register: rc = %d\n", r);
-		return false;
-	}
-
-	r = ext4_mount("ext4_fs", "/mp/", false);
+	r = ext4_mount(bdev, false, &mount_point);
 	if (r != EOK) {
 		printf("ext4_mount: rc = %d\n", r);
 		return false;
 	}
 
-	r = ext4_recover("/mp/");
+	r = ext4_recover(mount_point);
 	if (r != EOK && r != ENOTSUP) {
 		printf("ext4_recover: rc = %d\n", r);
 		return false;
 	}
 
-	r = ext4_journal_start("/mp/");
+	r = ext4_journal_start(mount_point);
 	if (r != EOK) {
 		printf("ext4_journal_start: rc = %d\n", r);
 		return false;
 	}
 
-	ext4_cache_write_back("/mp/", 1);
+	ext4_cache_write_back(mount_point, 1);
 	return true;
 }
 
@@ -441,15 +436,15 @@ bool test_lwext4_umount(void)
 {
 	int r;
 
-	ext4_cache_write_back("/mp/", 0);
+	ext4_cache_write_back(mount_point, 0);
 
-	r = ext4_journal_stop("/mp/");
+	r = ext4_journal_stop(mount_point);
 	if (r != EOK) {
 		printf("ext4_journal_stop: fail %d", r);
 		return false;
 	}
 
-	r = ext4_umount("/mp/");
+	r = ext4_umount(mount_point);
 	if (r != EOK) {
 		printf("ext4_umount: fail %d", r);
 		return false;

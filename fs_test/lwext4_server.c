@@ -79,6 +79,9 @@ static bool winpart = false;
 /**@brief   Blockdev handle*/
 static struct ext4_blockdev *bd;
 
+/**@brief   Mountpoint handle.*/
+void *mount_point;
+
 static bool cache_wb = false;
 
 static char read_buffer[MAX_RW_BUFFER];
@@ -125,7 +128,6 @@ static struct lwext4_dirs dir_tab[MAX_DIRS];
 
 /**@brief  */
 static struct lwext4_op_codes op_codes[] = {
-    "device_register",
     "mount",
     "umount",
     "mount_point_stats",
@@ -154,7 +156,6 @@ static struct lwext4_op_codes op_codes[] = {
     "stats_check",
 };
 
-int _device_register(char *p);
 int _mount(char *p);
 int _umount(char *p);
 int _mount_point_stats(char *p);
@@ -185,11 +186,10 @@ int _stats_check(char *p);
 
 /**@brief  */
 static struct lwext4_call op_call[] = {
-    _device_register,   /*PARAMS(3):   0 cache_mode dev_name   */
-    _mount,		/*PARAMS(2):   dev_name mount_point    */
-    _umount,		/*PARAMS(1):   mount_point             */
-    _mount_point_stats, /*PARAMS(2):   mount_point, 0          */
-    _cache_write_back,  /*PARAMS(2):   mount_point, en         */
+    _mount,		/*PARAMS(0):                           */
+    _umount,		/*PARAMS(0):                           */
+    _mount_point_stats, /*PARAMS(0):                           */
+    _cache_write_back,  /*PARAMS(1):   en                      */
     _fremove,		/*PARAMS(1):   path                    */
     _fopen,		/*PARAMS(2):   fid path flags          */
     _fclose,		/*PARAMS(1):   fid                     */
@@ -210,8 +210,8 @@ static struct lwext4_call op_call[] = {
     _multi_fremove, /*PARAMS(2):   path prefix cnt         */
     _multi_dcreate, /*PARAMS(3):   path prefix cnt         */
     _multi_dremove, /*PARAMS(2):   path prefix             */
-    _stats_save,    /*PARAMS(1):   path                    */
-    _stats_check,   /*PARAMS(1):   path                    */
+    _stats_save,    /*PARAMS(0):                           */
+    _stats_check,   /*PARAMS(0):                           */
 };
 
 static clock_t get_ms(void)
@@ -230,9 +230,6 @@ static int exec_op_code(char *opcode)
 	for (i = 0; i < sizeof(op_codes) / sizeof(op_codes[0]); ++i) {
 
 		if (strncmp(op_codes[i].func, opcode, strlen(op_codes[i].func)))
-			continue;
-
-		if (opcode[strlen(op_codes[i].func)] != ' ')
 			continue;
 
 		printf("%s\n", opcode);
@@ -381,16 +378,14 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-int _device_register(char *p)
+int _mount(char *p)
 {
-	int dev;
-	int cache_mode;
-	char dev_name[32];
+	int rc;
 
-	if (sscanf(p, "%d %d %s", &dev, &cache_mode, dev_name) != 3) {
-		printf("Param list error\n");
-		return -1;
-	}
+	(void)p;
+
+	if (verbose)
+		ext4_dmask_set(DEBUG_ALL);
 
 #ifdef WIN32
 	if (winpart) {
@@ -403,24 +398,10 @@ int _device_register(char *p)
 		ext4_filedev_filename(ext4_fname);
 		bd = ext4_filedev_get();
 	}
-	return ext4_device_register(bd, 0, dev_name);
-}
-
-int _mount(char *p)
-{
-	char dev_name[32];
-	char mount_point[32];
-	int rc;
-
-	if (sscanf(p, "%s %s", dev_name, mount_point) != 2) {
-		printf("Param list error\n");
+	if (!bd)
 		return -1;
-	}
 
-	if (verbose)
-		ext4_dmask_set(DEBUG_ALL);
-
-	rc = ext4_mount(dev_name, mount_point, false);
+	rc = ext4_mount(bd, false, &mount_point);
 	if (rc != EOK)
 		return rc;
 
@@ -439,13 +420,9 @@ int _mount(char *p)
 
 int _umount(char *p)
 {
-	char mount_point[32];
 	int rc;
 
-	if (sscanf(p, "%s", mount_point) != 1) {
-		printf("Param list error\n");
-		return -1;
-	}
+	(void)p;
 
 	if (cache_wb)
 		ext4_cache_write_back(mount_point, 0);
@@ -458,20 +435,16 @@ int _umount(char *p)
 	if (rc != EOK)
 		return rc;
 
+	mount_point = NULL;
+
 	return rc;
 }
 
 int _mount_point_stats(char *p)
 {
-	char mount_point[32];
 	int d;
 	int rc;
 	struct ext4_mount_stats stats;
-
-	if (sscanf(p, "%s %d", mount_point, &d) != 2) {
-		printf("Param list error\n");
-		return -1;
-	}
 
 	rc = ext4_mount_point_stats(mount_point, &stats);
 
@@ -500,10 +473,9 @@ int _mount_point_stats(char *p)
 
 int _cache_write_back(char *p)
 {
-	char mount_point[32];
 	int en;
 
-	if (sscanf(p, "%s %d", mount_point, &en) != 2) {
+	if (sscanf(p, "%d", &en) != 1) {
 		printf("Param list error\n");
 		return -1;
 	}
@@ -520,7 +492,7 @@ int _fremove(char *p)
 		return -1;
 	}
 
-	return ext4_fremove(path);
+	return ext4_fremove(mount_point, path);
 }
 
 int _fopen(char *p)
@@ -540,7 +512,7 @@ int _fopen(char *p)
 		return -1;
 	}
 
-	rc = ext4_fopen(&file_tab[fid].fd, path, flags);
+	rc = ext4_fopen(mount_point, &file_tab[fid].fd, path, flags);
 
 	if (rc == EOK)
 		strcpy(file_tab[fid].name, path);
@@ -752,7 +724,7 @@ static int __dir_rm(const char *path)
 	ext4_dir dir;
 	struct ext4_sblock *sb;
 	const ext4_direntry *entry;
-	rc = ext4_get_sblock(path, &sb);
+	rc = ext4_get_sblock(mount_point, &sb);
 	if (rc != EOK)
 		goto out;
 
@@ -763,7 +735,7 @@ static int __dir_rm(const char *path)
 
 		char *entry_path = NULL;
 
-		rc = ext4_dir_open(&dir, path);
+		rc = ext4_dir_open(mount_point, &dir, path);
 		if (rc != EOK)
 			break;
 
@@ -802,12 +774,12 @@ static int __dir_rm(const char *path)
 
 		ext4_dir_close(&dir);
 
-		rc = ext4_fill_raw_inode(entry_path, &ino, &inode);
+		rc = ext4_fill_raw_inode(mount_point, entry_path, &ino, &inode);
 		if (rc != EOK)
 			goto reclaim;
 
 		if (!ext4_inode_is_type(sb, &inode, EXT4_INODE_MODE_DIRECTORY))
-			rc = ext4_fremove(entry_path);
+			rc = ext4_fremove(mount_point, entry_path);
 		else
 			rc = __dir_rm(entry_path);
 
@@ -820,7 +792,7 @@ reclaim:
 
 out:
 	if (rc == EOK)
-		rc = ext4_dir_rm(path);
+		rc = ext4_dir_rm(mount_point, path);
 
 	return rc;
 }
@@ -846,7 +818,7 @@ int _dir_mk(char *p)
 		return -1;
 	}
 
-	return ext4_dir_mk(path);
+	return ext4_dir_mk(mount_point, path);
 }
 
 int _dir_open(char *p)
@@ -865,7 +837,7 @@ int _dir_open(char *p)
 		return -1;
 	}
 
-	rc = ext4_dir_open(&dir_tab[did].fd, path);
+	rc = ext4_dir_open(mount_point, &dir_tab[did].fd, path);
 
 	if (rc == EOK)
 		strcpy(dir_tab[did].name, path);
@@ -965,7 +937,7 @@ int _multi_fcreate(char *p)
 
 	for (i = 0; i < cnt; ++i) {
 		sprintf(path1, "%s%s%d", path, prefix, i);
-		rc = ext4_fopen(&fd, path1, "wb+");
+		rc = ext4_fopen(mount_point, &fd, path1, "wb+");
 
 		if (rc != EOK)
 			break;
@@ -992,7 +964,7 @@ int _multi_fwrite(char *p)
 
 	for (i = 0; i < cnt; ++i) {
 		sprintf(path1, "%s%s%d", path, prefix, i);
-		rc = ext4_fopen(&fd, path1, "rb+");
+		rc = ext4_fopen(mount_point, &fd, path1, "rb+");
 
 		if (rc != EOK)
 			break;
@@ -1035,7 +1007,7 @@ int _multi_fread(char *p)
 
 	for (i = 0; i < cnt; ++i) {
 		sprintf(path1, "%s%s%d", path, prefix, i);
-		rc = ext4_fopen(&fd, path1, "rb+");
+		rc = ext4_fopen(mount_point, &fd, path1, "rb+");
 
 		if (rc != EOK)
 			break;
@@ -1081,7 +1053,7 @@ int _multi_fremove(char *p)
 
 	for (i = 0; i < cnt; ++i) {
 		sprintf(path1, "%s%s%d", path, prefix, i);
-		rc = ext4_fremove(path1);
+		rc = ext4_fremove(mount_point, path1);
 		if (rc != EOK)
 			break;
 	}
@@ -1103,7 +1075,7 @@ int _multi_dcreate(char *p)
 
 	for (i = 0; i < cnt; ++i) {
 		sprintf(path1, "%s%s%d", path, prefix, i);
-		rc = ext4_dir_mk(path1);
+		rc = ext4_dir_mk(mount_point, path1);
 		if (rc != EOK)
 			break;
 	}
@@ -1137,29 +1109,18 @@ struct ext4_mount_stats saved_stats;
 
 int _stats_save(char *p)
 {
-	char path[256];
-
-	if (sscanf(p, "%s", path) != 1) {
-		printf("Param list error\n");
-		return -1;
-	}
-
-	return ext4_mount_point_stats(path, &saved_stats);
+	(void)p;
+	return ext4_mount_point_stats(mount_point, &saved_stats);
 }
 
 int _stats_check(char *p)
 {
-	char path[256];
 	int rc;
-
 	struct ext4_mount_stats actual_stats;
 
-	if (sscanf(p, "%s", path) != 1) {
-		printf("Param list error\n");
-		return -1;
-	}
+	(void)p;
 
-	rc = ext4_mount_point_stats(path, &actual_stats);
+	rc = ext4_mount_point_stats(mount_point, &actual_stats);
 
 	if (rc != EOK)
 		return rc;

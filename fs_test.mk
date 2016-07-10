@@ -10,30 +10,26 @@ endif
 TEST_DIR = /test
 
 t0:
-	@echo "T0: Device register test:" 
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
+	@echo "T0: Device register test: (noop)"
 
 t1:
-	@echo "T1: Single mount-umount test:" 
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	@echo "T1: Single mount-umount test:"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t2:
-	@echo "T2: Multiple mount-umount test:" 
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "umount /"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "umount /"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	@echo "T2: Multiple mount-umount test:"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "umount"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "umount"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t3:
 	@echo "T3: Test dir create/remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	$(LWEXT4_CLIENT) -c "dir_open 0 $(TEST_DIR)"
@@ -41,14 +37,13 @@ t3:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
 	
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t4:
 	@echo "T4: 10 files create + write + read + remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 10"
@@ -60,14 +55,13 @@ t4:
 	$(LWEXT4_CLIENT) -c "multi_fremove  $(TEST_DIR) /f 10"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t5:
 	@echo "T5: 100 files create + write + read + remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 100"
@@ -79,14 +73,13 @@ t5:
 	$(LWEXT4_CLIENT) -c "multi_fremove  $(TEST_DIR) /f 100"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t6:
 	@echo "T6: 1000 files create + write + read + remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 1000"
@@ -98,14 +91,13 @@ t6:
 	$(LWEXT4_CLIENT) -c "multi_fremove  $(TEST_DIR) /f 1000"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t7:
 	@echo "T7: 10 dirs create + remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 10"
@@ -115,14 +107,13 @@ t7:
 	$(LWEXT4_CLIENT) -c "multi_dremove $(TEST_DIR) /d 10"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t8:
 	@echo "T8: 100 dirs create + remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 100"
@@ -132,14 +123,13 @@ t8:
 	$(LWEXT4_CLIENT) -c "multi_dremove $(TEST_DIR) /d 100"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t9:
 	@echo "T9: 1000 dirs create + remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 1000"
@@ -149,14 +139,13 @@ t9:
 	$(LWEXT4_CLIENT) -c "multi_dremove $(TEST_DIR) /d 1000"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t10:
 	@echo "T10: 10 entries (dir) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 10"
@@ -165,14 +154,13 @@ t10:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t11:
 	@echo "T11: 100 entries (dir) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 100"
@@ -181,14 +169,13 @@ t11:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t12:
 	@echo "T12: 1000 entries (dir) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 1000"
@@ -198,14 +185,13 @@ t12:
 
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t13:
 	@echo "T13: 10 entries (files) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 10"
@@ -216,14 +202,13 @@ t13:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t14:
 	@echo "T14: 100 entries (files) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 100"
@@ -234,14 +219,13 @@ t14:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t15:
 	@echo "T15: 1000 entries (files) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 1000"
@@ -252,15 +236,14 @@ t15:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 
 
 t16:	
 	@echo "T16: 8kB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -284,17 +267,16 @@ t16:
 	$(LWEXT4_CLIENT) -c "fsize 0 8192"
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 		
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"		
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t17:	
 	@echo "T17: 64kB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -318,17 +300,16 @@ t17:
 	$(LWEXT4_CLIENT) -c "fsize 0 65536"
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 		
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t18:	
 	@echo "T18: 512kB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -352,17 +333,15 @@ t18:
 	$(LWEXT4_CLIENT) -c "fsize 0 524288"
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
-		
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t19:	
 	@echo "T19: 4MB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -386,17 +365,16 @@ t19:
 	$(LWEXT4_CLIENT) -c "fsize 0 4194304"
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 		
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t20:	
 	@echo "T20: 32MB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -420,17 +398,16 @@ t20:
 	$(LWEXT4_CLIENT) -c "fsize 0 33554432"
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t21:	
 	@echo "T21: 128MB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -455,16 +432,15 @@ t21:
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
 
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t22:	
 	@echo "T22: 512MB file write/read:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "fopen 0 $(TEST_DIR)/test.txt wb+"
@@ -489,16 +465,15 @@ t22:
 	
 	$(LWEXT4_CLIENT) -c "fclose 0"
 	
-	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"	
+	$(LWEXT4_CLIENT) -c "fremove $(TEST_DIR)/test.txt"
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t23:
 	@echo "T23: 10000 entries (files) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 10000"
@@ -508,14 +483,13 @@ t23:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 
 t24:
 	@echo "T24: 50000 entries (files) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_fcreate $(TEST_DIR) /f 50000"
@@ -525,15 +499,14 @@ t24:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 	
 t25:
 	@echo "T25: 10000 entries (dir) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 10000"
@@ -541,14 +514,13 @@ t25:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 t26:
 	@echo "T26: 50000 entries (dir) dir recursive remove:"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
-	$(LWEXT4_CLIENT) -c "stats_save /"
+	$(LWEXT4_CLIENT) -c "mount"
+	$(LWEXT4_CLIENT) -c "stats_save"
 	$(LWEXT4_CLIENT) -c "dir_mk $(TEST_DIR)"
 	
 	$(LWEXT4_CLIENT) -c "multi_dcreate $(TEST_DIR) /d 50000"
@@ -556,16 +528,15 @@ t26:
 	$(LWEXT4_CLIENT) -c "dir_close 0"
 	
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "stats_check /"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "stats_check"
+	$(LWEXT4_CLIENT) -c "umount"
 	
 
 ct:
 	@echo "Clean test directory"
-	$(LWEXT4_CLIENT) -c "device_register 0 0 bdev"
-	$(LWEXT4_CLIENT) -c "mount bdev /"
+	$(LWEXT4_CLIENT) -c "mount"
 	$(LWEXT4_CLIENT) -c "dir_rm $(TEST_DIR)"
-	$(LWEXT4_CLIENT) -c "umount /"	
+	$(LWEXT4_CLIENT) -c "umount"
 
 server_ext2:
 	$(LWEXT4_SERVER) -i ext_images/ext2
