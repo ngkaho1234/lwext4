@@ -40,6 +40,7 @@
 
 #include "ext4_config.h"
 #include "ext4_types.h"
+#include "ext4_lock.h"
 #include "ext4_misc.h"
 #include "ext4_errno.h"
 #include "ext4_debug.h"
@@ -57,6 +58,12 @@
 #include "ext4_extent.h"
 
 #include <string.h>
+
+/*
+ * LWEXT4 synchronization utilities
+ */
+struct ext4_mutex ext4_mutex;
+struct ext4_rwlock ext4_rwlock;
 
 int ext4_fs_init(struct ext4_fs *fs, struct ext4_blockdev *bdev,
 		 bool read_only)

@@ -65,22 +65,6 @@ struct ext4_lock {
 	void (*unlock)(void);
 };
 
-/**@brief   OS dependent mutex interface.*/
-struct ext4_mutex {
-
-	/**@brief   Mutex allocation interface*/
-	void *(*alloc)(void);
-
-	/**@brief   Mutex deallocation interface*/
-	void (*free)(void *mutex);
-
-	/**@brief   Lock routine*/
-	void (*lock)(void *mutex);
-
-	/**@brief   Unlock routine*/
-	void (*unlock)(void *mutex);
-};
-
 /********************************FILE DESCRIPTOR*****************************/
 
 /**@brief   File descriptor*/

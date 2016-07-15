@@ -48,25 +48,14 @@ extern "C" {
 #include "misc/tree.h"
 #include "misc/queue.h"
 
-#define EXT4_BLOCK_ZERO() 	\
-	{.lb_id = 0, .data = 0}
-
-/**@brief   Single block descriptor*/
-struct ext4_block {
-	/**@brief   Logical block ID*/
-	uint64_t lb_id;
-
-	/**@brief   Buffer */
-	struct ext4_buf *buf;
-
-	/**@brief   Data buffer.*/
-	uint8_t *data;
-};
-
 struct ext4_bcache;
 
 /**@brief   Single block descriptor*/
 struct ext4_buf {
+	
+	/**@brief   Lock*/
+	void *lock;
+
 	/**@brief   Flags*/
 	int flags;
 
@@ -103,15 +92,13 @@ struct ext4_buf {
 	/**@brief   Callback routine after a disk-write operation.
 	 * @param   bc block cache descriptor
 	 * @param   buf buffer descriptor
-	 * @param   standard error code returned by bdev->bwrite()
-	 * @param   arg argument passed to this routine*/
+	 * @param   standard error code returned by bdev->bwrite()*/
 	void (*end_write)(struct ext4_bcache *bc,
 			  struct ext4_buf *buf,
-			  int res,
-			  void *arg);
+			  int res);
 
-	/**@brief   argument passed to end_write() callback.*/
-	void *end_write_arg;
+	/**@brief   Private field preserved for txn manager*/
+	void *priv_txn;
 };
 
 /**@brief   Block cache descriptor*/
@@ -135,8 +122,14 @@ struct ext4_bcache {
 	/**@brief   The blockdev binded to this block cache*/
 	struct ext4_blockdev *bdev;
 
-	/**@brief   The cache should not be shaked */
-	bool dont_shake;
+	/**@brief   LBA Tree RW-lock*/
+	void *lba_root_rwlock;
+
+	/**@brief   LRU Tree RW-lock*/
+	void *lru_root_rwlock;
+
+	/**@brief   Dirty list mutex*/
+	void *dirty_list_mutex;
 
 	/**@brief   A tree holding all bufs*/
 	RB_HEAD(ext4_buf_lba, ext4_buf) lba_root;

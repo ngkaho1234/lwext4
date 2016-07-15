@@ -151,9 +151,7 @@ int ext4_block_flush_buf(struct ext4_blockdev *bdev, struct ext4_buf *buf)
 		r = ext4_blocks_set_direct(bdev, buf->data, buf->lba, 1);
 		if (r) {
 			if (buf->end_write) {
-				bc->dont_shake = true;
 				buf->end_write(bc, buf, r, buf->end_write_arg);
-				bc->dont_shake = false;
 			}
 
 			return r;
@@ -162,9 +160,7 @@ int ext4_block_flush_buf(struct ext4_blockdev *bdev, struct ext4_buf *buf)
 		ext4_bcache_remove_dirty_node(bc, buf);
 		ext4_bcache_clear_flag(buf, BC_DIRTY);
 		if (buf->end_write) {
-			bc->dont_shake = true;
 			buf->end_write(bc, buf, r, buf->end_write_arg);
-			bc->dont_shake = false;
 		}
 	}
 	return EOK;
@@ -187,10 +183,6 @@ int ext4_block_cache_shake(struct ext4_blockdev *bdev)
 {
 	int r = EOK;
 	struct ext4_buf *buf;
-	if (bdev->bc->dont_shake)
-		return EOK;
-
-	bdev->bc->dont_shake = true;
 
 	/* Try to release memory pressure. */
 	if (bdev->journal)
@@ -210,7 +202,6 @@ int ext4_block_cache_shake(struct ext4_blockdev *bdev)
 
 		ext4_bcache_drop_buf(bdev->bc, buf);
 	}
-	bdev->bc->dont_shake = false;
 	return r;
 }
 
