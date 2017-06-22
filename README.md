@@ -43,7 +43,6 @@ lwext4 GPLv2 licensed. To use library as a BSD3, GPLv2 licensed source
 files must be removed first. At this point there are two files
 licensed under GPLv2:
 * ext4_xattr.c
-* ext4_extents.c
 
 All other modules and headers are BSD-3-Clause licensed code.
 

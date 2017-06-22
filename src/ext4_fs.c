@@ -1231,7 +1231,7 @@ int ext4_fs_truncate_inode(struct ext4_inode_ref *inode_ref, uint64_t new_size)
 		/* Extents require special operation */
 		if (diff_blocks_cnt) {
 			r = ext4_extent_remove_space(inode_ref, new_blocks_cnt,
-						     EXT_MAX_BLOCKS);
+						     EXT4_EXTENT_MAX_BLOCKS);
 			if (r != EOK)
 				return r;
 

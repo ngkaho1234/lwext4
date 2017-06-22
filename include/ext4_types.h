@@ -582,8 +582,63 @@ struct ext4_dir_entry_tail {
 #define EXT4_JOURNAL_INO 8
 
 #define EXT4_GOOD_OLD_FIRST_INO 11
-#define EXT_MAX_BLOCKS (ext4_lblk_t) (-1)
-#define IN_RANGE(b, first, len)	((b) >= (first) && (b) <= (first) + (len) - 1)
+
+#pragma pack(push, 1)
+
+/*
+ * This is the extent tail on-disk structure.
+ * All other extent structures are 12 bytes long.  It turns out that
+ * block size % 12 >= 4 for at least all powers of 2 greater than 512, which
+ * covers all valid ext4 block sizes.  Therefore, this tail structure can be
+ * crammed into the end of the block without having to rebalance the tree.
+ */
+struct ext4_extent_tail
+{
+	uint32_t checksum;	/* crc32c(uuid+inum+extent_block) */
+};
+
+/*
+ * This is the extent on-disk structure.
+ * It's used at the bottom of the tree.
+ */
+struct ext4_extent {
+	uint32_t iblock;	/* First logical block extent covers */
+	uint16_t nblocks;	/* Number of blocks covered by extent */
+	uint16_t fblock_hi;	/* High 16 bits of physical block */
+	uint32_t fblock_lo;	/* Low 32 bits of physical block */
+};
+
+/*
+ * This is index on-disk structure.
+ * It's used at all the levels except the bottom.
+ */
+struct ext4_extent_index {
+	uint32_t iblock; /* Index covers logical blocks from 'block' */
+
+	/**
+	 * Pointer to the physical block of the next
+	 * level. leaf or next index could be there
+	 * high 16 bits of physical block
+	 */
+	uint32_t fblock_lo;
+	uint16_t fblock_hi;
+	uint16_t padding;
+};
+
+/*
+ * Each block (leaves and indexes), even inode-stored has header.
+ */
+struct ext4_extent_header {
+	uint16_t magic;
+	uint16_t nentries;	/* Number of valid entries */
+	uint16_t max_nentries;	/* Capacity of store in entries */
+	uint16_t depth;		/* Has tree real underlying blocks? */
+	uint32_t generation;	/* generation of the tree */
+};
+
+#define EXT4_EXTENT_MAGIC 0xF30A
+
+#pragma pack(pop)
 
 
 /******************************************************************************/
